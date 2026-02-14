@@ -242,11 +242,11 @@ class DropZone(QWidget):
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(10)
 
-        # Cloud icon circle
-        self._icon_label = QLabel("☁")
+        # Upload icon circle
+        self._icon_label = QLabel("📤")
         self._icon_label.setFixedSize(32, 32)
         self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._icon_label.setFont(QFont("Segoe UI", 13))
+        self._icon_label.setFont(QFont("Segoe UI Emoji", 13))
         self._update_icon_style(False)
         layout.addWidget(self._icon_label)
 

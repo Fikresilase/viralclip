@@ -40,8 +40,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Content Factory — AI Video Generator")
-        self.setMinimumSize(600, 600)
-        self.resize(1000, 750)
+        self.setMinimumSize(900, 650)
+        self.resize(1200, 800)
         self.setStyleSheet(GLOBAL_STYLESHEET)
 
         # Central scroll area so the UI is scrollable on small screens
@@ -64,7 +64,7 @@ class MainWindow(QMainWindow):
         # ── 2. Body (centered content) ────────────────────────────────────
         body = QWidget()
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(16, 24, 16, 24)
+        body_layout.setContentsMargins(24, 28, 24, 28)
         body_layout.setSpacing(0)
         body_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
 
@@ -123,7 +123,7 @@ class MainWindow(QMainWindow):
     def _build_hero(self) -> QWidget:
         """Centered heading + subtitle."""
         hero = QWidget()
-        hero.setMaximumWidth(700)
+        hero.setMaximumWidth(820)
         hero.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout = QVBoxLayout(hero)
         layout.setContentsMargins(8, 0, 8, 0)
@@ -163,7 +163,7 @@ class MainWindow(QMainWindow):
         """The large rounded card containing all inputs and the CTA."""
         card = QFrame()
         card.setMinimumWidth(320)
-        card.setMaximumWidth(900)
+        card.setMaximumWidth(1100)
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         card.setStyleSheet(f"""
             QFrame#mainCard {{
