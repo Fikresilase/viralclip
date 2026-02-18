@@ -12,193 +12,116 @@ class ResultCard(QFrame):
     def __init__(self, data):
         super().__init__()
         self.data = data
-        self.setFixedSize(220, 340)
+        self.setFixedSize(200, 380)
         self.setStyleSheet(f"""
             QFrame {{
                 background-color: {SURFACE_DARK};
                 border: 1px solid {BORDER_DARK};
-                border-radius: 12px;
+                border-radius: 16px;
             }}
-            QFrame:hover {{
-                border: 1px solid {PRIMARY};
-            }}
+            QFrame:hover {{ border-color: {PRIMARY}; }}
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(0, 0, 0, 12)
+        layout.setSpacing(10)
         
-        # Thumbnail
-        thumb_lbl = QLabel()
-        thumb_lbl.setFixedSize(196, 110) # 16:9 approx
-        thumb_lbl.setStyleSheet(f"background-color: #000; border-radius: 8px;")
-        thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Thumbnail (Vertical 9:16)
+        self.thumb = QLabel()
+        self.thumb.setFixedHeight(280)
+        self.thumb.setStyleSheet("background-color: #000; border-top-left-radius: 16px; border-top-right-radius: 16px;")
         
-        pixmap = QPixmap(data['thumb'])
-        if not pixmap.isNull():
-             thumb_lbl.setPixmap(pixmap.scaled(
-                 thumb_lbl.size(), 
-                 Qt.AspectRatioMode.KeepAspectRatioByExpanding, 
-                 Qt.TransformationMode.SmoothTransformation
-             ))
-        layout.addWidget(thumb_lbl)
+        pix = QPixmap(data['thumb'])
+        if not pix.isNull():
+            self.thumb.setPixmap(pix.scaled(200, 280, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation))
+        layout.addWidget(self.thumb)
         
-        # Title
+        # Info
+        info_l = QVBoxLayout()
+        info_l.setContentsMargins(12, 0, 12, 0)
+        info_l.setSpacing(4)
+
         title = QLabel(data['title'])
+        title.setFont(QFont("Inter", 10, QFont.Weight.Bold))
         title.setWordWrap(True)
-        title.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        title.setStyleSheet(f"color: {TEXT_WHITE}; border: none;")
-        title.setFixedHeight(40)
-        title.setAlignment(Qt.AlignmentFlag.AlignTop)
-        layout.addWidget(title)
+        title.setFixedHeight(34)
+        info_l.addWidget(title)
         
-        # Score Badge
-        score_container = QHBoxLayout()
-        score_badge = QLabel(f"🔥 {data['score']}")
-        score_badge.setStyleSheet(f"""
-            background-color: rgba(244, 37, 140, 0.2);
-            color: {PRIMARY};
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-weight: bold;
-            font-size: 11px;
-        """)
-        score_container.addWidget(score_badge)
-        score_container.addStretch()
-        layout.addLayout(score_container)
+        score_l = QHBoxLayout()
+        score_l.setSpacing(4)
+        flash = QLabel("⚡")
+        flash.setStyleSheet(f"color: {PRIMARY}; font-size: 10px;")
+        score_l.addWidget(flash)
         
-        # Reason (Tooltip or small text)
-        reason = QLabel(data['reason'])
-        reason.setWordWrap(True)
-        reason.setFont(QFont("Segoe UI", 8))
-        reason.setStyleSheet(f"color: {TEXT_MUTED}; border: none;")
-        reason.setFixedHeight(30)
-        layout.addWidget(reason)
+        score = QLabel(f"{data.get('score', '95%')} Viral Score")
+        score.setFont(QFont("Inter", 9, QFont.Weight.Bold))
+        score.setStyleSheet(f"color: {PRIMARY};")
+        score_l.addWidget(score)
+        score_l.addStretch()
+        info_l.addLayout(score_l)
+
+        layout.addLayout(info_l)
         
-        layout.addStretch()
+        # Hover Overlay Actions (Simplified for this version)
+        btns = QHBoxLayout()
+        btns.setContentsMargins(12, 0, 12, 0)
         
-        # Actions
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(8)
+        p_btn = QPushButton("▶ Play")
+        p_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        p_btn.setFixedHeight(28)
+        p_btn.setStyleSheet(f"background: white; color: black; border-radius: 4px; font-size: 10px; font-weight: bold;")
+        p_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(data['path'])))
         
-        play_btn = QPushButton("▶ Play")
-        play_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        play_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {SURFACE_DARK};
-                border: 1px solid {BORDER_DARK};
-                color: {TEXT_WHITE};
-                border-radius: 6px;
-                padding: 6px;
-                font-size: 11px;
-            }}
-            QPushButton:hover {{
-                background-color: {BORDER_DARK};
-            }}
-        """)
-        play_btn.clicked.connect(self._play_video)
+        s_btn = QPushButton("⬇")
+        s_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        s_btn.setFixedSize(28, 28)
+        s_btn.setStyleSheet(f"background: #3f3f46; color: white; border-radius: 4px;")
+        s_btn.clicked.connect(self._save)
         
-        dl_btn = QPushButton("💾 Save")
-        dl_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        dl_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {PRIMARY};
-                border: none;
-                color: {TEXT_WHITE};
-                border-radius: 6px;
-                padding: 6px;
-                font-weight: bold;
-                font-size: 11px;
-            }}
-            QPushButton:hover {{
-                background-color: #d61c78;
-            }}
-        """)
-        dl_btn.clicked.connect(self._save_video)
-        
-        btn_layout.addWidget(play_btn)
-        btn_layout.addWidget(dl_btn)
-        layout.addLayout(btn_layout)
-        
-    def _play_video(self):
-        QDesktopServices.openUrl(QUrl.fromLocalFile(self.data['path']))
-        
-    def _save_video(self):
-        dest, _ = QFileDialog.getSaveFileName(
-            self, "Save Video", 
-            self.data['title'] + ".mp4", 
-            "MP4 Files (*.mp4)"
-        )
+        btns.addWidget(p_btn, stretch=1)
+        btns.addWidget(s_btn)
+        layout.addLayout(btns)
+
+    def _save(self):
+        dest, _ = QFileDialog.getSaveFileName(self, "Save Video", self.data['title']+".mp4", "Video (*.mp4)")
         if dest:
             import shutil
-            try:
-                shutil.copy2(self.data['path'], dest)
-            except Exception as e:
-                print(f"Error saving: {e}")
+            shutil.copy2(self.data['path'], dest)
 
 class ResultsView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(24)
         
-        # Title
-        header = QLabel("Viral Shorts Generated ✨")
-        header.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
-        header.setStyleSheet(f"color: {TEXT_WHITE}; margin-bottom: 16px;")
-        layout.addWidget(header)
+        # Header
+        header = QHBoxLayout()
+        h_lbl = QLabel("🗓️ Generated Clips")
+        h_lbl.setFont(QFont("Inter", 16, QFont.Weight.Bold))
+        header.addWidget(h_lbl)
+        header.addStretch()
         
-        # Grid Area
+        self.back_btn = QPushButton("↺ Start New Project")
+        self.back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.back_btn.setStyleSheet("color: #94a3b8; font-size: 11px; background: transparent;")
+        header.addWidget(self.back_btn)
+        self.layout.addLayout(header)
+        
+        # Grid
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(f"""
-            QScrollArea {{ background: transparent; border: none; }}
-            QScrollBar:vertical {{ background: {SURFACE_DARK}; width: 8px; }}
-            QScrollBar::handle:vertical {{ background: {BORDER_DARK}; border-radius: 4px; }}
-        """)
-        
         self.container = QWidget()
-        self.container.setStyleSheet("background: transparent;")
         self.grid = QGridLayout(self.container)
-        self.grid.setSpacing(20)
+        self.grid.setSpacing(24)
         self.grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        
         scroll.setWidget(self.container)
-        layout.addWidget(scroll)
-        
-        # Back Button
-        self.back_btn = QPushButton("← Create More")
-        self.back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.back_btn.setFixedSize(120, 36)
-        self.back_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                border: 1px solid {BORDER_DARK};
-                color: {TEXT_MUTED};
-                border-radius: 18px;
-            }}
-            QPushButton:hover {{
-                color: {TEXT_WHITE};
-                border-color: {TEXT_WHITE};
-            }}
-        """)
-        layout.addWidget(self.back_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.layout.addWidget(scroll)
 
     def populate(self, results):
-        # Clear existing
         while self.grid.count():
-            child = self.grid.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-                
-        # Add cards
-        row, col = 0, 0
-        cols = 3 # 3 columns grid
-        
-        for item in results:
-            card = ResultCard(item)
-            self.grid.addWidget(card, row, col)
-            col += 1
-            if col >= cols:
-                col = 0
-                row += 1
+            w = self.grid.takeAt(0).widget()
+            if w: w.deleteLater()
+        for i, res in enumerate(results):
+            self.grid.addWidget(ResultCard(res), i // 4, i % 4)
+
