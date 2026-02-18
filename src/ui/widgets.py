@@ -15,9 +15,13 @@ from PyQt6.QtWidgets import (
     QLineEdit
 )
 from PyQt6.QtCore import (
-    Qt, QPropertyAnimation, QEasingCurve, pyqtSignal, QMimeData, QSettings
+    Qt, QPropertyAnimation, QEasingCurve, pyqtSignal, QMimeData, QSettings,
+    QRectF, pyqtProperty
 )
-from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QDragEnterEvent, QDropEvent
+from PyQt6.QtGui import (
+    QColor, QPainter, QBrush, QPen, QFont, QDragEnterEvent, QDropEvent, 
+    QPixmap, QPainterPath
+)
 
 from src.ui.theme import (
     PRIMARY, PRIMARY_HOVER, BG_DARK, SURFACE_DARK, SURFACE_INPUT,
@@ -172,7 +176,7 @@ class ToggleSwitch(QWidget):
         self._animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
 
     # ── Qt property for animation ──────────────────────────────────────────
-    @property
+    @pyqtProperty(float)
     def knob_x(self) -> float:
         return self._knob_x
 
@@ -339,6 +343,179 @@ class DropZone(QWidget):
             border: 1px solid {BORDER_DARK};
             border-radius: 16px;
         """)
+
+
+# ── Preview Widget ─────────────────────────────────────────────────────────────
+class PreviewWidget(QWidget):
+    """
+    Displays a video thumbnail/preview image with a remove button.
+    Used to replace the input area when a valid video is selected.
+    """
+    
+    removeClicked = pyqtSignal()
+    
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setMinimumHeight(120)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        
+        # Internal state
+        self._pixmap = None
+        self._title = ""
+        self._loading = False
+        self._aspect_ratio = 16 / 9  # Default to 16:9
+        
+        # Layout
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 1. Loading State
+        self._loading_label = QLabel("Loading Preview...", self)
+        self._loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._loading_label.setFont(QFont("Segoe UI", 12))
+        self._loading_label.setStyleSheet(f"color: {TEXT_MUTED};")
+        self._loading_label.hide()
+        
+        # 2. Image Display (Custom Paint)
+        # We handle painting in paintEvent to get rounded corners easily
+        
+        # 3. Overlay Controls (Close Button, Title)
+        # We'll use a child widget for the overlay to position it absolutely?
+        # Or just standard layout.
+        
+        # Let's use a container for the controls that sits on top
+        self._overlay = QWidget(self)
+        self._overlay.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._overlay.raise_()
+        self._overlay.setGeometry(0, 0, 100, 100) # Will update in resizeEvent
+        
+        ov_layout = QVBoxLayout(self._overlay)
+        ov_layout.setContentsMargins(12, 12, 12, 12)
+        
+        # Top Row: Close Button
+        top_row = QHBoxLayout()
+        top_row.addStretch()
+        
+        self.close_btn = QPushButton("✕", self._overlay)
+        self.close_btn.setFixedSize(32, 32)
+        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_btn.clicked.connect(self.removeClicked.emit)
+        self.close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: rgba(0, 0, 0, 0.6);
+                color: {TEXT_WHITE};
+                border-radius: 16px;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {PRIMARY};
+                border-color: {PRIMARY};
+            }}
+        """)
+        top_row.addWidget(self.close_btn)
+        ov_layout.addLayout(top_row)
+        
+        ov_layout.addStretch()
+        
+        # Bottom Row: Title
+        self.title_label = QLabel()
+        self.title_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        self.title_label.setStyleSheet(f"""
+            color: {TEXT_WHITE};
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 4px 8px;
+            border-radius: 4px;
+        """)
+        self.title_label.setWordWrap(True)
+        self.title_label.hide() # Show only when text is set
+        ov_layout.addWidget(self.title_label)
+
+        # 4. Final adjustments to layout
+        # We need to make sure the overlay is above everything
+        self._overlay.raise_()
+        
+    def set_loading(self, loading: bool):
+        self._loading = loading
+        self._loading_label.setVisible(loading)
+        if loading:
+            self._loading_label.setGeometry(self.rect())
+        self._pixmap = None
+        self.title_label.hide()
+        self.close_btn.setVisible(not loading)
+        self.update()
+        
+    def set_error(self, message: str):
+        self._loading = False
+        self._loading_label.setText(f"Error: {message}")
+        self._loading_label.show()
+        self._pixmap = None
+        self.close_btn.show()
+        self.update()
+        
+    def set_preview(self, pixmap: QPixmap, title: str):
+        self._loading = False
+        self._loading_label.hide()
+        self._pixmap = pixmap
+        self._title = title
+        
+        # Calculate and store aspect ratio
+        if pixmap and not pixmap.isNull():
+            self._aspect_ratio = pixmap.width() / pixmap.height()
+        
+        if title:
+            self.title_label.setText(title)
+            self.title_label.show()
+        else:
+            self.title_label.hide()
+            
+        self.close_btn.show()
+        self._overlay.raise_()
+        self.updateGeometry()
+        self.update()
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return int(width / self._aspect_ratio)
+
+    def resizeEvent(self, event):
+        self._overlay.setGeometry(self.rect())
+        if self._loading_label.isVisible():
+            self._loading_label.setGeometry(self.rect())
+        super().resizeEvent(event)
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Clip path for rounded corners
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()), 16, 16)
+        painter.setClipPath(path)
+        
+        # Background
+        painter.setBrush(QBrush(QColor(SURFACE_INPUT)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(self.rect(), 16, 16)
+        
+        # Draw Image if available (fit without cropping)
+        if self._pixmap and not self._pixmap.isNull():
+            scaled = self._pixmap.scaled(
+                self.size(), 
+                Qt.AspectRatioMode.KeepAspectRatio, 
+                Qt.TransformationMode.SmoothTransformation
+            )
+            
+            # Center the image
+            x = (self.width() - scaled.width()) // 2
+            y = (self.height() - scaled.height()) // 2
+            
+            painter.drawPixmap(x, y, scaled)
+        
+        painter.end()
+
 
 
 # ── API Key Button ─────────────────────────────────────────────────────────────

@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import (
     QLineEdit, QComboBox, QFrame, QScrollArea, QSizePolicy,
     QGraphicsDropShadowEffect
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QFont, QPainter, QBrush, QLinearGradient, QPen
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QColor, QFont, QPainter, QBrush, QLinearGradient, QPen, QPixmap, QImage
 
 # Assumed imports based on your provided context
 from src.ui.theme import (
@@ -16,8 +16,10 @@ from src.ui.theme import (
     TEXT_WHITE, BLUE_ACCENT, BLUE_ACCENT_BG, GLOBAL_STYLESHEET
 )
 from src.ui.widgets import (
-    GlowButton, UpgradeButton, ToggleSwitch, IconBadge, DropZone, ApiKeyButton
+    GlowButton, UpgradeButton, ToggleSwitch, IconBadge, DropZone, ApiKeyButton,
+    PreviewWidget
 )
+from src.workers.preview_worker import PreviewWorker
 
 
 class MainWindow(QMainWindow):
@@ -172,24 +174,38 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(32, 32, 32, 32)
         layout.setSpacing(24)
 
-        # ── Top Row: URL | Divider | Upload ──────────────────────────────
-        top_row = QHBoxLayout()
-        top_row.setSpacing(0)
-
+        # ── Top Row Container (Swappable) ────────────────────────────────
+        self.top_container = QWidget()
+        self.top_layout = QVBoxLayout(self.top_container)
+        self.top_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 1. Input View (URL + Upload)
+        self.input_view = QWidget()
+        input_layout = QHBoxLayout(self.input_view)
+        input_layout.setContentsMargins(0, 0, 0, 0)
+        input_layout.setSpacing(0)
+        
         # Left: URL
-        top_row.addLayout(self._build_url_section(), stretch=4)
+        input_layout.addLayout(self._build_url_section(), stretch=4)
         
         # Center: Divider
-        # We wrap the divider in a layout to ensure it handles vertical expansion
         div_layout = QVBoxLayout()
         div_layout.setContentsMargins(0, 0, 0, 0)
         div_layout.addWidget(self._build_or_divider())
-        top_row.addLayout(div_layout, stretch=1)
+        input_layout.addLayout(div_layout, stretch=1)
 
         # Right: Upload
-        top_row.addLayout(self._build_upload_section(), stretch=4)
+        input_layout.addLayout(self._build_upload_section(), stretch=4)
+        
+        self.top_layout.addWidget(self.input_view)
+        
+        # 2. Preview View (Hidden by default)
+        self.preview_widget = PreviewWidget()
+        self.preview_widget.hide()
+        self.preview_widget.removeClicked.connect(self._reset_input_mode)
+        self.top_layout.addWidget(self.preview_widget)
 
-        layout.addLayout(top_row)
+        layout.addWidget(self.top_container)
 
         # ── Settings Row ──────────────────────────────────────────────────
         settings_row = QHBoxLayout()
@@ -248,7 +264,14 @@ class MainWindow(QMainWindow):
                 border: 1px solid {PRIMARY};
             }}
         """)
+        self.url_input.textChanged.connect(self._on_url_text_changed)
         layout.addWidget(self.url_input)
+
+        # Debounce timer for URL input
+        self.url_timer = QTimer()
+        self.url_timer.setSingleShot(True)
+        self.url_timer.setInterval(800) # 800ms debounce
+        self.url_timer.timeout.connect(self._process_url_input)
 
         # Helper
         helper = QLabel("Supports YouTube, TikTok, and Instagram Reels")
@@ -470,3 +493,56 @@ class MainWindow(QMainWindow):
     def _on_file_dropped(self, path: str):
         """Handle file drop."""
         print(f"File dropped: {path}")
+        self._start_preview(path, is_local=True)
+
+    def _on_url_text_changed(self):
+        """Restart debounce timer on text change."""
+        self.url_timer.start()
+        
+    def _process_url_input(self):
+        """Check if URL is valid and start preview."""
+        text = self.url_input.text().strip()
+        if not text:
+            return
+            
+        # Basic check if it looks like a URL
+        if "youtube.com" in text or "youtu.be" in text:
+            self._start_preview(text, is_local=False)
+
+    def _start_preview(self, source: str, is_local: bool):
+        """Switch to preview mode and start worker."""
+        # Update UI state
+        self.input_view.hide()
+        self.preview_widget.show()
+        self.preview_widget.set_loading(True)
+        
+        # Cleanup old worker
+        if hasattr(self, 'worker') and self.worker:
+            self.worker.quit()
+            self.worker.wait()
+            
+        # Start new worker
+        self.worker = PreviewWorker(source, is_local)
+        self.worker.previewReady.connect(self._on_preview_ready)
+        self.worker.errorOccurred.connect(self._on_preview_error)
+        self.worker.start()
+
+    def _on_preview_ready(self, image: QImage, title: str):
+        """Handle successful preview."""
+        pixmap = QPixmap.fromImage(image)
+        self.preview_widget.set_preview(pixmap, title)
+        
+    def _on_preview_error(self, error: str):
+        """Handle preview error."""
+        self.preview_widget.set_error(error)
+        print(f"Preview Error: {error}")
+        
+    def _reset_input_mode(self):
+        """Go back to input mode."""
+        self.preview_widget.hide()
+        self.input_view.show()
+        self.url_input.clear()
+        
+        # Stop worker if running
+        if hasattr(self, 'worker') and self.worker:
+            self.worker.quit()

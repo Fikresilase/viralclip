@@ -27,6 +27,7 @@ Absolute Don’ts
 
 ❌ Do NOT mix PyQt5 with PyQt6
 ❌ Do NOT change Python version
+❌ Do NOT change the UI theme
 ❌ Do NOT bypass requirements.txt
 
 Run App
