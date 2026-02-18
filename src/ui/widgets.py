@@ -11,9 +11,12 @@ Contains:
 
 from PyQt6.QtWidgets import (
     QWidget, QPushButton, QLabel, QHBoxLayout, QVBoxLayout,
-    QGraphicsDropShadowEffect, QCheckBox, QSizePolicy
+    QGraphicsDropShadowEffect, QCheckBox, QSizePolicy, QDialog, QMessageBox,
+    QLineEdit
 )
-from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtSignal, QMimeData
+from PyQt6.QtCore import (
+    Qt, QPropertyAnimation, QEasingCurve, pyqtSignal, QMimeData, QSettings
+)
 from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont, QDragEnterEvent, QDropEvent
 
 from src.ui.theme import (
@@ -336,3 +339,149 @@ class DropZone(QWidget):
             border: 1px solid {BORDER_DARK};
             border-radius: 16px;
         """)
+
+
+# ── API Key Button ─────────────────────────────────────────────────────────────
+class ApiKeyButton(QPushButton):
+    """Small header button: 🔑 API Key."""
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__("🔑  API Key", parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedHeight(36)
+        self.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {SURFACE_INPUT};
+                color: {TEXT_WHITE};
+                border: 1px solid {BORDER_DARK};
+                border-radius: 8px;
+                padding: 0 16px;
+                font-size: 12px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                border: 1px solid {PRIMARY};
+                background-color: {SURFACE_DARK};
+            }}
+        """)
+        self.clicked.connect(self._open_dialog)
+
+    def _open_dialog(self):
+        dlg = ApiKeyDialog(self)
+        dlg.exec()
+
+
+# ── API Key Dialog ─────────────────────────────────────────────────────────────
+class ApiKeyDialog(QDialog):
+    """Modal to Enter/Save/Remove API Key."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("API Key Settings")
+        self.setFixedSize(400, 220)
+        
+        # Apply theme to dialog
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {BG_DARK};
+            }}
+            QLabel {{
+                color: {TEXT_WHITE};
+            }}
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(20)
+        layout.setContentsMargins(32, 32, 32, 32)
+        
+        # Title
+        title = QLabel("Gemini API Key")
+        title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+        layout.addWidget(title)
+        
+        # Input
+        self.key_input = QLineEdit()
+        self.key_input.setPlaceholderText("Paste your API key here...")
+        self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.key_input.setFixedHeight(40)
+        self.key_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {SURFACE_INPUT};
+                border: 1px solid {BORDER_DARK};
+                border-radius: 8px;
+                padding: 0 12px;
+                color: {TEXT_WHITE};
+                font-size: 14px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {PRIMARY};
+            }}
+        """)
+        layout.addWidget(self.key_input)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+        
+        self.remove_btn = QPushButton("Remove")
+        self.remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.remove_btn.setFixedHeight(36)
+        self.remove_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: #ff4444;
+                border: 1px solid #ff4444;
+                border-radius: 6px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(255, 68, 68, 0.1);
+            }}
+        """)
+        self.remove_btn.clicked.connect(self.remove_key)
+        
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.save_btn.setFixedHeight(36)
+        self.save_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {PRIMARY};
+                color: {TEXT_WHITE};
+                border: none;
+                border-radius: 6px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {PRIMARY_HOVER};
+            }}
+        """)
+        self.save_btn.clicked.connect(self.save_key)
+        
+        btn_layout.addWidget(self.remove_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.save_btn)
+        
+        layout.addLayout(btn_layout)
+        
+        # Load existing
+        self.settings = QSettings("ViralClips", "Content Factory")
+        current_key = self.settings.value("gemini_api_key", "")
+        if current_key:
+            self.key_input.setText(current_key)
+            
+    def save_key(self):
+        key = self.key_input.text().strip()
+        if key:
+            self.settings.setValue("gemini_api_key", key)
+            QMessageBox.information(self, "Success", "API Key saved successfully!")
+            self.accept()
+        else:
+            QMessageBox.warning(self, "Error", "Please enter a valid API key.")
+            
+    def remove_key(self):
+        self.settings.remove("gemini_api_key")
+        self.key_input.clear()
+        QMessageBox.information(self, "Removed", "API Key removed.")
+        self.accept()

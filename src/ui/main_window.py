@@ -16,7 +16,7 @@ from src.ui.theme import (
     TEXT_WHITE, BLUE_ACCENT, BLUE_ACCENT_BG, GLOBAL_STYLESHEET
 )
 from src.ui.widgets import (
-    GlowButton, UpgradeButton, ToggleSwitch, IconBadge, DropZone
+    GlowButton, UpgradeButton, ToggleSwitch, IconBadge, DropZone, ApiKeyButton
 )
 
 
@@ -103,6 +103,7 @@ class MainWindow(QMainWindow):
         layout.addStretch()
 
         # Right side actions
+        layout.addWidget(ApiKeyButton())
         layout.addWidget(UpgradeButton())
 
         return header
