@@ -22,6 +22,7 @@ from src.ui.widgets import (
 from src.ui.results_view import ResultsView
 from src.workers.preview_worker import PreviewWorker
 from src.workers.generator_worker import GeneratorWorker
+from src.utils.storage import StorageManager
 
 
 class MainWindow(QMainWindow):
@@ -29,6 +30,10 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self.storage = StorageManager()
+        # Clean up old cache on startup
+        self.storage.cleanup()
+        
         self.current_source = None
         self.current_is_local = False
         
@@ -610,6 +615,12 @@ class MainWindow(QMainWindow):
         self.worker.previewReady.connect(self._on_preview_ready)
         self.worker.errorOccurred.connect(self._on_preview_error)
         self.worker.start()
+
+    def closeEvent(self, event):
+        """Cleanup resources on close."""
+        if hasattr(self, 'storage'):
+            self.storage.cleanup()
+        super().closeEvent(event)
 
     def _on_preview_ready(self, image: QImage, title: str):
         """Handle successful preview."""

@@ -15,6 +15,7 @@ import yt_dlp
 
 from src.prompts import VIRAL_MOMENTS_PROMPT, VISUAL_MOMENTS_PROMPT
 from src.core.face_tracker import FaceTracker
+from src.utils.storage import StorageManager
 
 class GeneratorWorker(QThread):
     progress = pyqtSignal(str)
@@ -26,9 +27,10 @@ class GeneratorWorker(QThread):
         self.source = source
         self.is_local = is_local
         self.api_key = api_key
-        self.output_dir = os.path.join(os.getcwd(), "viral_shorts")
-        if not os.path.exists(self.output_dir):
-            os.makedirs(self.output_dir)
+        
+        # Use StorageManager for output directory
+        self.storage = StorageManager()
+        self.output_dir = self.storage.temp_dir 
         
         # Locate system ffmpeg
         self.ffmpeg_path = shutil.which('ffmpeg')
@@ -493,11 +495,12 @@ class GeneratorWorker(QThread):
         self.log(f"Processing Clip {i+1}: {seg.get('title', 'Unknown')}")
         self.log(f"  Range: {timedelta(seconds=start)} - {timedelta(seconds=end)} (Duration: {duration}s)")
         
+        # Use StorageManager for file paths
         filename = f"short_{int(time.time())}_{i}.mp4"
-        out_path = os.path.join(self.output_dir, filename)
-        thumb_path = os.path.join(self.output_dir, f"thumb_{i}.jpg")
-        temp_raw_path = os.path.join(self.output_dir, f"temp_raw_{i}.mp4")
-        temp_cropped_path = os.path.join(self.output_dir, f"temp_cropped_{i}.mp4")
+        out_path = self.storage.get_new_path(filename)
+        thumb_path = self.storage.get_new_path(f"thumb_{i}.jpg")
+        temp_raw_path = self.storage.get_new_path(f"temp_raw_{i}.mp4")
+        temp_cropped_path = self.storage.get_new_path(f"temp_cropped_{i}.mp4")
         
         cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
 
@@ -563,20 +566,10 @@ class GeneratorWorker(QThread):
                 if not ret:
                     break
                 
-                # Get crop parameters
-                # Use raw detection on the frame
-                # FaceTracker handles RGB conversion internally
-                x, y, w, h = tracker.get_crop_params(width, height, tracker.face_detection.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+                # Apply new Tracker Logic
+                cropped = tracker.process_frame(frame)
                 
-                # Apply crop
-                # Ensure bounds
-                y = max(0, min(y, height - h))
-                x = max(0, min(x, width - w))
-                
-                cropped = frame[y:y+h, x:x+w]
-                
-                # Resize if necessary (though our logic keeps h=height, so it should be fine)
-                # Just in case of rounding errors
+                # Resize if necessary (safety check)
                 if cropped.shape[0] != target_h or cropped.shape[1] != target_w:
                     cropped = cv2.resize(cropped, (target_w, target_h))
                 
@@ -604,6 +597,7 @@ class GeneratorWorker(QThread):
             subprocess.run(cmd_merge, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
             # Cleanup Temps
+            # Managed by StorageManager cleanup or deleted here to save space during run
             if os.path.exists(temp_raw_path):
                 os.remove(temp_raw_path)
             if os.path.exists(temp_cropped_path):
