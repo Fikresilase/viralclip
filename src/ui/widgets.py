@@ -50,9 +50,10 @@ class IconBadge(QWidget):
         self._bg_color = bg_color
         self._icon_color = icon_color
 
-    def paintEvent(self, event):
+    def paintEvent(self, a0):
         """Draw rounded rect background and centered icon text."""
         painter = QPainter(self)
+
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # Background
@@ -402,11 +403,13 @@ class PreviewWidget(QWidget):
         self.close_btn.clicked.connect(self.removeClicked.emit)
         self.close_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: rgba(0, 0, 0, 0.6);
+                background-color: rgba(0, 0, 0, 0.85);
                 color: {TEXT_WHITE};
                 border-radius: 16px;
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                font-weight: bold;
+                border: 2px solid rgba(255, 255, 255, 0.5);
+                font-weight: 900;
+                font-size: 16px;
+                padding-bottom: 2px;
             }}
             QPushButton:hover {{
                 background-color: {PRIMARY};
@@ -459,9 +462,8 @@ class PreviewWidget(QWidget):
         self._pixmap = pixmap
         self._title = title
         
-        # Calculate and store aspect ratio
-        if pixmap and not pixmap.isNull():
-            self._aspect_ratio = pixmap.width() / pixmap.height()
+        # Force 16:9 aspect ratio regardless of image dimensions
+        self._aspect_ratio = 16 / 9
         
         if title:
             self.title_label.setText(title)
@@ -477,16 +479,16 @@ class PreviewWidget(QWidget):
     def hasHeightForWidth(self) -> bool:
         return True
 
-    def heightForWidth(self, width: int) -> int:
-        return int(width / self._aspect_ratio)
+    def heightForWidth(self, a0: int) -> int:
+        return int(a0 / self._aspect_ratio)
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, a0):
         self._overlay.setGeometry(self.rect())
         if self._loading_label.isVisible():
             self._loading_label.setGeometry(self.rect())
-        super().resizeEvent(event)
+        super().resizeEvent(a0)
         
-    def paintEvent(self, event):
+    def paintEvent(self, a0):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
@@ -504,7 +506,7 @@ class PreviewWidget(QWidget):
         if self._pixmap and not self._pixmap.isNull():
             scaled = self._pixmap.scaled(
                 self.size(), 
-                Qt.AspectRatioMode.KeepAspectRatio, 
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding, 
                 Qt.TransformationMode.SmoothTransformation
             )
             

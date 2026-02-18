@@ -5,9 +5,9 @@ main_window.py - Main application window for ViralClips.
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QComboBox, QFrame, QScrollArea, QSizePolicy,
-    QGraphicsDropShadowEffect
+    QGraphicsDropShadowEffect, QMessageBox, QStackedWidget
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QSettings
 from PyQt6.QtGui import QColor, QFont, QPainter, QBrush, QLinearGradient, QPen, QPixmap, QImage
 
 # Assumed imports based on your provided context
@@ -19,7 +19,9 @@ from src.ui.widgets import (
     GlowButton, UpgradeButton, ToggleSwitch, IconBadge, DropZone, ApiKeyButton,
     PreviewWidget
 )
+from src.ui.results_view import ResultsView
 from src.workers.preview_worker import PreviewWorker
+from src.workers.generator_worker import GeneratorWorker
 
 
 class MainWindow(QMainWindow):
@@ -27,7 +29,11 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self.current_source = None
+        self.current_is_local = False
+        
         self.setWindowTitle("Content Factory — AI Video Generator")
+
         self.setMinimumSize(1000, 700)
         self.resize(1200, 850)
         self.setStyleSheet(GLOBAL_STYLESHEET)
@@ -205,9 +211,23 @@ class MainWindow(QMainWindow):
         self.preview_widget.removeClicked.connect(self._reset_input_mode)
         self.top_layout.addWidget(self.preview_widget)
 
+        # 3. Results View (Hidden by default)
+        self.results_view = ResultsView()
+        self.results_view.hide()
+        self.results_view.back_btn.clicked.connect(self._reset_input_mode)
+        self.top_layout.addWidget(self.results_view)
+
         layout.addWidget(self.top_container)
 
-        # ── Settings Row ──────────────────────────────────────────────────
+        # ── Settings Row & Generate Button (Hidden initially) ─────────────
+
+        self.options_container = QWidget()
+        self.options_container.hide()  # Hidden until video is added
+        options_layout = QVBoxLayout(self.options_container)
+        options_layout.setContentsMargins(0, 0, 0, 0)
+        options_layout.setSpacing(20)
+
+        # Settings Row
         settings_row = QHBoxLayout()
         settings_row.setSpacing(20)
         
@@ -217,14 +237,15 @@ class MainWindow(QMainWindow):
         # Output Language
         settings_row.addWidget(self._build_language_card(), stretch=1)
         
-        layout.addLayout(settings_row)
-        layout.addSpacing(12)
-
-        # ── Generate Button ───────────────────────────────────────────────
+        options_layout.addLayout(settings_row)
+        
+        # Generate Button
         self.generate_btn = GlowButton("Generate Shorts   ✨")
         self.generate_btn.clicked.connect(self._on_generate)
         self.generate_btn.setFixedHeight(56)
-        layout.addWidget(self.generate_btn)
+        options_layout.addWidget(self.generate_btn)
+
+        layout.addWidget(self.options_container)
 
         return card
 
@@ -233,11 +254,12 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         layout.setSpacing(12)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop) # Crucial: Keeps content at top
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # Header
         header = QHBoxLayout()
         header.setSpacing(10)
+        header.setAlignment(Qt.AlignmentFlag.AlignVCenter) # Ensure vertical alignment
         header.addWidget(IconBadge("🔗", "rgba(244, 37, 140, 0.1)", PRIMARY, size=32))
         
         lbl = QLabel("Paste URL")
@@ -295,6 +317,7 @@ class MainWindow(QMainWindow):
         # Header
         header = QHBoxLayout()
         header.setSpacing(10)
+        header.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         header.addWidget(IconBadge("📁", BLUE_ACCENT_BG, BLUE_ACCENT, size=32))
         
         lbl = QLabel("Upload File")
@@ -305,6 +328,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(header)
 
         # Drop Zone
+
         self.drop_zone = DropZone()
         self.drop_zone.fileDropped.connect(self._on_file_dropped)
         self.drop_zone.setMinimumHeight(100) # Ensure it has presence
@@ -323,9 +347,10 @@ class MainWindow(QMainWindow):
                 # This ensures the divider expands vertically to fill the QHBoxLayout
                 self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
 
-            def paintEvent(self, event):
+            def paintEvent(self, a0):
                 p = QPainter(self)
                 p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
                 
                 w = self.width()
                 h = self.height()
@@ -485,10 +510,64 @@ class MainWindow(QMainWindow):
     # ══════════════════════════════════════════════════════════════════════
     def _on_generate(self):
         """Handle Generate Shorts button click."""
-        url = self.url_input.text().strip()
-        lang = self.language_combo.currentText()
-        smart = self.smart_toggle.isChecked()
-        print(f"Generating with: URL={url}, Lang={lang}, Smart={smart}")
+        if not self.current_source:
+             QMessageBox.warning(self, "Error", "No video selected.")
+             return
+
+        # Get API Key
+        settings = QSettings("ViralClips", "Content Factory")
+        api_key = settings.value("gemini_api_key", "")
+        if not api_key:
+            QMessageBox.warning(self, "Error", "Please set your Gemini API Key first (top right button).")
+            return
+
+        # Disable UI
+        self.generate_btn.setEnabled(False)
+        self.generate_btn.setText("Processing... ⏳")
+        self.input_view.hide()
+        self.preview_widget.hide()
+        self.options_container.hide()
+        
+        # Reuse preview widget loading state for progress
+        self.preview_widget.show()
+        self.preview_widget.set_loading(True)
+        # Access internal label directly or add a method. For now, hack it:
+        self.preview_widget._loading_label.setText("Analyzing Content with Gemini AI...\nDepending on video length, this can take a few minutes.")
+
+        # Start Worker
+        self.gen_worker = GeneratorWorker(self.current_source, self.current_is_local, api_key)
+        self.gen_worker.finished.connect(self._on_generation_finished)
+        self.gen_worker.error.connect(self._on_generation_error)
+        self.gen_worker.progress.connect(self._on_generation_progress)
+        self.gen_worker.start()
+
+    def _on_generation_progress(self, msg):
+        if self.preview_widget.isVisible():
+             self.preview_widget._loading_label.setText(msg)
+
+    def _on_generation_finished(self, results):
+        self.generate_btn.setEnabled(True)
+        self.generate_btn.setText("Generate Shorts   ✨")
+        
+        self.preview_widget.hide()
+        self.options_container.hide()
+        
+        self.results_view.populate(results)
+        self.results_view.show()
+
+    def _on_generation_error(self, err):
+        self.generate_btn.setEnabled(True)
+        self.generate_btn.setText("Generate Shorts   ✨")
+        
+        # Restore preview state
+        self.preview_widget.hide()
+        self.results_view.hide()
+        
+        self.preview_widget.show()
+        self.preview_widget.set_loading(False)
+        self.options_container.show()
+        
+        QMessageBox.critical(self, "Generation Failed", f"Error: {err}")
 
     def _on_file_dropped(self, path: str):
         """Handle file drop."""
@@ -511,9 +590,14 @@ class MainWindow(QMainWindow):
 
     def _start_preview(self, source: str, is_local: bool):
         """Switch to preview mode and start worker."""
+        self.current_source = source
+        self.current_is_local = is_local
+        
         # Update UI state
         self.input_view.hide()
+        self.results_view.hide()
         self.preview_widget.show()
+        self.options_container.show()
         self.preview_widget.set_loading(True)
         
         # Cleanup old worker
@@ -540,9 +624,16 @@ class MainWindow(QMainWindow):
     def _reset_input_mode(self):
         """Go back to input mode."""
         self.preview_widget.hide()
+        self.results_view.hide()
+        self.options_container.hide()
         self.input_view.show()
         self.url_input.clear()
         
+        self.current_source = None
+        self.current_is_local = False
+        
         # Stop worker if running
+
+
         if hasattr(self, 'worker') and self.worker:
             self.worker.quit()
