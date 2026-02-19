@@ -70,10 +70,26 @@ class MainWindow(QMainWindow):
         body_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
 
         # Hero heading
-        body_layout.addWidget(self._build_hero(), alignment=Qt.AlignmentFlag.AlignHCenter)
+        self.hero_widget = self._build_hero()
+        body_layout.addWidget(self.hero_widget, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         # Main Interface Card
         body_layout.addWidget(self._build_main_card(), alignment=Qt.AlignmentFlag.AlignHCenter)
+        
+        # Results View (Full Width Container)
+        self.results_container = QWidget()
+        self.results_container.setMaximumWidth(1400)  # max-w-7xl equivalent
+        results_container_layout = QVBoxLayout(self.results_container)
+        results_container_layout.setContentsMargins(0, 0, 0, 0)
+        results_container_layout.setSpacing(0)
+        
+        # Move results view here
+        self.results_view_main = ResultsView()
+        self.results_view_main.hide()
+        self.results_view_main.back_btn.clicked.connect(self._reset_input_mode)
+        results_container_layout.addWidget(self.results_view_main)
+        
+        body_layout.addWidget(self.results_container, alignment=Qt.AlignmentFlag.AlignHCenter)
         
         # Bottom stretch to push content up if window is huge
         body_layout.addStretch()
@@ -165,10 +181,10 @@ class MainWindow(QMainWindow):
     # ══════════════════════════════════════════════════════════════════════
     def _build_main_card(self) -> QWidget:
         """The large rounded card containing inputs matching web design."""
-        card = QFrame()
-        card.setFixedWidth(1100)
-        card.setObjectName("mainCard")
-        card.setStyleSheet(f"""
+        self.main_card = QFrame()
+        self.main_card.setFixedWidth(1100)
+        self.main_card.setObjectName("mainCard")
+        self.main_card.setStyleSheet(f"""
             QFrame#mainCard {{
                 background-color: {SURFACE_DARK};
                 border: 1px solid {BORDER_DARK};
@@ -177,13 +193,13 @@ class MainWindow(QMainWindow):
         """)
 
         # Shadow
-        shadow = QGraphicsDropShadowEffect(card)
+        shadow = QGraphicsDropShadowEffect(self.main_card)
         shadow.setBlurRadius(80)
         shadow.setColor(QColor(0, 0, 0, 150))
         shadow.setOffset(0, 10)
-        card.setGraphicsEffect(shadow)
+        self.main_card.setGraphicsEffect(shadow)
 
-        layout = QVBoxLayout(card)
+        layout = QVBoxLayout(self.main_card)
         layout.setContentsMargins(48, 48, 48, 48)
         layout.setSpacing(0)
 
@@ -218,11 +234,7 @@ class MainWindow(QMainWindow):
         self.preview_widget.removeClicked.connect(self._reset_input_mode)
         self.top_layout.addWidget(self.preview_widget)
 
-        # 3. Results View
-        self.results_view = ResultsView()
-        self.results_view.hide()
-        self.results_view.back_btn.clicked.connect(self._reset_input_mode)
-        self.top_layout.addWidget(self.results_view)
+
 
         layout.addWidget(self.top_container)
 
@@ -247,7 +259,7 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.options_container)
 
-        return card
+        return self.main_card
 
     # ── URL Input Section ──────────────────────────────────────────────────
     def _build_url_section(self) -> QVBoxLayout:
@@ -468,11 +480,16 @@ class MainWindow(QMainWindow):
         self.generate_btn.setEnabled(True)
         self.generate_btn.setText("Generate Shorts   ✨")
         
+        # Hide all input UI
         self.preview_widget.hide()
         self.options_container.hide()
+        self.main_card.hide()
+        self.hero_widget.hide()
         
-        self.results_view.populate(results)
-        self.results_view.show()
+        # Show results in full-width container
+        self.results_view_main.populate(results)
+        self.results_container.show()
+        self.results_view_main.show()
 
     def _on_generation_error(self, err):
         self.generate_btn.setEnabled(True)
@@ -480,8 +497,11 @@ class MainWindow(QMainWindow):
         
         # Restore preview state
         self.preview_widget.hide()
-        self.results_view.hide()
+        self.results_view_main.hide()
+        self.results_container.hide()
         
+        self.main_card.show()
+        self.hero_widget.show()
         self.preview_widget.show()
         self.preview_widget.set_loading(False)
         self.options_container.show()
@@ -514,7 +534,8 @@ class MainWindow(QMainWindow):
         
         # Update UI state
         self.input_view.hide()
-        self.results_view.hide()
+        self.results_view_main.hide()
+        self.results_container.hide()
         self.preview_widget.show()
         self.options_container.show()
         self.preview_widget.set_loading(True)
@@ -549,144 +570,13 @@ class MainWindow(QMainWindow):
     def _reset_input_mode(self):
         """Go back to input mode."""
         self.preview_widget.hide()
-        self.results_view.hide()
-        self.options_container.hide()
-        self.input_view.show()
-        self.url_input.clear()
-        
-        self.current_source = None
-        self.current_is_local = False
-        
-        if hasattr(self, 'worker') and self.worker:
-            self.worker.terminate()
-            self.worker.wait()
-
-
-class _OrDivider(QWidget):
-    def _on_generate(self):
-        """Handle Generate Shorts button click."""
-        if not self.current_source:
-             QMessageBox.warning(self, "Error", "No video selected.")
-             return
-
-        # Get API Key
-        settings = QSettings("ViralClips", "Content Factory")
-        api_key = settings.value("gemini_api_key", "")
-        if not api_key:
-            QMessageBox.warning(self, "Error", "Please set your Gemini API Key first (top right button).")
-            return
-
-        # Disable UI
-        self.generate_btn.setEnabled(False)
-        self.generate_btn.setText("Processing... ⏳")
-        self.input_view.hide()
-        self.preview_widget.hide()
+        self.results_view_main.hide()
+        self.results_container.hide()
         self.options_container.hide()
         
-        # Reuse preview widget loading state for progress
-        self.preview_widget.show()
-        self.preview_widget.set_loading(True)
-        # Access internal label directly or add a method. For now, hack it:
-        self.preview_widget._loading_label.setText("Analyzing Content with Gemini AI...\nDepending on video length, this can take a few minutes.")
-
-        # Start Worker
-        self.gen_worker = GeneratorWorker(self.current_source, self.current_is_local, api_key)
-        self.gen_worker.finished.connect(self._on_generation_finished)
-        self.gen_worker.error.connect(self._on_generation_error)
-        self.gen_worker.progress.connect(self._on_generation_progress)
-        self.gen_worker.start()
-
-    def _on_generation_progress(self, msg):
-        if self.preview_widget.isVisible():
-             self.preview_widget._loading_label.setText(msg)
-
-    def _on_generation_finished(self, results):
-        self.generate_btn.setEnabled(True)
-        self.generate_btn.setText("Generate Shorts   ✨")
-        
-        self.preview_widget.hide()
-        self.options_container.hide()
-        
-        self.results_view.populate(results)
-        self.results_view.show()
-
-    def _on_generation_error(self, err):
-        self.generate_btn.setEnabled(True)
-        self.generate_btn.setText("Generate Shorts   ✨")
-        
-        # Restore preview state
-        self.preview_widget.hide()
-        self.results_view.hide()
-        
-        self.preview_widget.show()
-        self.preview_widget.set_loading(False)
-        self.options_container.show()
-        
-        QMessageBox.critical(self, "Generation Failed", f"Error: {err}")
-
-    def _on_file_dropped(self, path: str):
-        """Handle file drop."""
-        print(f"File dropped: {path}")
-        self._start_preview(path, is_local=True)
-
-    def _on_url_text_changed(self):
-        """Restart debounce timer on text change."""
-        self.url_timer.start()
-        
-    def _process_url_input(self):
-        """Check if URL is valid and start preview."""
-        text = self.url_input.text().strip()
-        if not text:
-            return
-            
-        # Basic check if it looks like a URL
-        if "youtube.com" in text or "youtu.be" in text:
-            self._start_preview(text, is_local=False)
-
-    def _start_preview(self, source: str, is_local: bool):
-        """Switch to preview mode and start worker."""
-        self.current_source = source
-        self.current_is_local = is_local
-        
-        # Update UI state
-        self.input_view.hide()
-        self.results_view.hide()
-        self.preview_widget.show()
-        self.options_container.show()
-        self.preview_widget.set_loading(True)
-        
-        # Cleanup old worker
-        if hasattr(self, 'worker') and self.worker:
-            self.worker.quit()
-            self.worker.wait()
-            
-        # Start new worker
-        self.worker = PreviewWorker(source, is_local)
-        self.worker.previewReady.connect(self._on_preview_ready)
-        self.worker.errorOccurred.connect(self._on_preview_error)
-        self.worker.start()
-
-    def closeEvent(self, event):
-        """Cleanup resources on close."""
-        if hasattr(self, 'storage'):
-            self.storage.cleanup()
-        super().closeEvent(event)
-
-    def _on_preview_ready(self, image: QImage, title: str):
-        """Handle successful preview."""
-        pixmap = QPixmap.fromImage(image)
-        self.preview_widget.set_preview(pixmap, title)
-        
-    def _on_preview_error(self, error: str):
-        """Handle preview error."""
-        self.preview_widget.set_error(error)
-        print(f"Preview Error: {error}")
-        
-    def _reset_input_mode(self):
-        """Go back to input mode."""
-        self.preview_widget.hide()
-        self.results_view.hide()
-        self.options_container.hide()
+        # Show input UI
+        self.main_card.show()
+        self.hero_widget.show()
         self.input_view.show()
         self.url_input.clear()
         
