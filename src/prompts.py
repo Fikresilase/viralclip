@@ -2,7 +2,7 @@
 VIRAL_MOMENTS_PROMPT = """
 You are an expert viral content editor. Your goal is to identify the most engaging, shareable, and high-retention segments from the provided content.
 
-Analyze the content and extract 10 clips that have the highest potential to go viral on TikTok, YouTube Shorts, or Instagram Reels.
+Analyze the content and extract 2 clips that have the highest potential to go viral on TikTok, YouTube Shorts, or Instagram Reels.
 
 For each clip, you MUST provide:
 1.  **start_time**: The exact start timestamp (MM:SS).
@@ -52,8 +52,8 @@ For each chosen segment, you MUST provide:
 5.  **reason**: Why this visual segment is viral.
 
 **CRITICAL GUIDELINES:**
-*   Generate exactly 10 clips.
-*   Clips should be between 30 and 60 seconds long.
+*   Generate exactly 2 clips.
+*   Clips should be between 20 and 30 seconds long.
 *   Prioritize visually striking moments.
 
 **OUTPUT FORMAT:**

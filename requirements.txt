@@ -1,5 +1,5 @@
 PyQt6>=6.7.0
-google-generativeai>=0.5.0
+google-genai>=0.1.0
 opencv-python>=4.9.0
 yt-dlp
 requests
@@ -7,4 +7,3 @@ Pillow
 numpy
 mediapipe==0.10.9
 protobuf<4.21.0
-ultralytics

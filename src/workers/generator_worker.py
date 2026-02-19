@@ -9,7 +9,7 @@ from datetime import timedelta
 import concurrent.futures
 
 import cv2
-import google.generativeai as genai
+from google import genai
 from PyQt6.QtCore import QThread, pyqtSignal
 import yt_dlp
 
@@ -65,8 +65,7 @@ class GeneratorWorker(QThread):
                 raise Exception("Gemini API Key is missing.")
 
             self.log("Configuring Gemini AI...")
-            genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel('gemini-3-flash-preview')
+            self.client = genai.Client(api_key=self.api_key)
             self.log("Gemini AI configured successfully.")
 
             # 1. Get Context (Text or Audio)
@@ -260,19 +259,25 @@ class GeneratorWorker(QThread):
             try:
                 if context_type == 'text':
                     prompt = VIRAL_MOMENTS_PROMPT + "\n\nTRANSCRIPT:\n" + chunk_data['content']
-                    response = self.model.generate_content(prompt)
+                    response = self.client.models.generate_content(
+                        model='gemini-3-flash-preview',
+                        contents=prompt
+                    )
                     response_text = response.text
                 else:
                     self.log(f"Uploading audio chunk {i+1} ({os.path.getsize(chunk_data['path'])/1024/1024:.2f} MB)...")
-                    myfile = genai.upload_file(chunk_data['path'])
+                    uploaded_file = self.client.files.upload(file_path=chunk_data['path'])
                     
                     self.log("Waiting for file processing...")
-                    while myfile.state.name == "PROCESSING":
+                    while uploaded_file.state == 'PROCESSING':
                         time.sleep(2)
-                        myfile = genai.get_file(myfile.name)
+                        uploaded_file = self.client.files.get(name=uploaded_file.name)
                     
                     self.log("Sending to Gemini...")
-                    response = self.model.generate_content([VIRAL_MOMENTS_PROMPT, myfile])
+                    response = self.client.models.generate_content(
+                        model='gemini-3-flash-preview',
+                        contents=[VIRAL_MOMENTS_PROMPT, uploaded_file]
+                    )
                     response_text = response.text
                     
                     # Cleanup
@@ -357,19 +362,22 @@ class GeneratorWorker(QThread):
         try:
             for i, frame in enumerate(frames):
                 self.log(f"Uploading frame {i+1}...")
-                myfile = genai.upload_file(frame['path'])
+                uploaded_file = self.client.files.upload(file_path=frame['path'])
                 
                 # Wait for processing
-                while myfile.state.name == "PROCESSING":
+                while uploaded_file.state == 'PROCESSING':
                     time.sleep(1)
-                    myfile = genai.get_file(myfile.name)
+                    uploaded_file = self.client.files.get(name=uploaded_file.name)
                 
-                uploaded_files.append(myfile)
+                uploaded_files.append(uploaded_file)
                 prompt_parts.append(f"Frame {i+1} (taken at {timedelta(seconds=frame['time'])})")
-                prompt_parts.append(myfile)
+                prompt_parts.append(uploaded_file)
             
             self.log("Sending prompt to Gemini...")
-            response = self.model.generate_content(prompt_parts)
+            response = self.client.models.generate_content(
+                model='gemini-3-flash-preview',
+                contents=prompt_parts
+            )
             response_text = response.text
             self.log("Gemini response received.")
             
@@ -411,9 +419,9 @@ class GeneratorWorker(QThread):
                     self.log(f"Error parsing timestamp {item}: {e}")
             
             # Cleanup remote files
-            for myfile in uploaded_files:
+            for uploaded_file in uploaded_files:
                 try:
-                    genai.delete_file(myfile.name)
+                    self.client.files.delete(name=uploaded_file.name)
                 except:
                     pass
 
@@ -467,8 +475,8 @@ class GeneratorWorker(QThread):
     def _process_clips(self, segments):
         processed = []
         
-        # Parallelize download and processing
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        # Reduce parallelism to avoid OpenCV thread conflicts
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
             # Submit all tasks
             future_to_seg = {
                 executor.submit(self._process_single_clip, i, seg): seg 
@@ -551,55 +559,119 @@ class GeneratorWorker(QThread):
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = cap.get(cv2.CAP_PROP_FPS)
             
+            # Validate dimensions
+            if width <= 0 or height <= 0 or fps <= 0:
+                cap.release()
+                raise Exception(f"Invalid video properties: {width}x{height} @ {fps}fps")
+            
             # Target dimensions (9:16)
-            # Strategy: Keep height, crop width to h * 9/16
             target_h = height
             target_w = int(target_h * 9 / 16)
             
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            out = cv2.VideoWriter(temp_cropped_path, fourcc, fps, (target_w, target_h))
+            # Ensure dimensions are even (required by H.264 encoder)
+            target_w = target_w - (target_w % 2)
+            target_h = target_h - (target_h % 2)
+            
+            # Ensure target dimensions are valid
+            if target_w <= 0 or target_h <= 0:
+                cap.release()
+                raise Exception(f"Invalid target dimensions: {target_w}x{target_h}")
+            
+            self.log(f"  Clip {i+1}: Processing frames to {target_w}x{target_h} @ {fps}fps")
+            
+            # Create frames directory
+            frames_dir = os.path.join(self.output_dir, f"frames_{i}")
+            os.makedirs(frames_dir, exist_ok=True)
             
             tracker = FaceTracker()
+            frame_count = 0
             
             while True:
                 ret, frame = cap.read()
                 if not ret:
                     break
                 
-                # Apply new Tracker Logic
-                cropped = tracker.process_frame(frame)
+                # Apply face tracking and cropping
+                try:
+                    cropped = tracker.process_frame(frame)
+                except Exception as e:
+                    self.log(f"  Clip {i+1}: Frame {frame_count} tracking error: {e}")
+                    frame_count += 1
+                    continue
                 
-                # Resize if necessary (safety check)
+                # Validate cropped frame
+                if cropped is None or cropped.size == 0:
+                    self.log(f"  Clip {i+1}: Warning - empty frame at {frame_count}, skipping")
+                    frame_count += 1
+                    continue
+                
+                # Resize if necessary
                 if cropped.shape[0] != target_h or cropped.shape[1] != target_w:
                     cropped = cv2.resize(cropped, (target_w, target_h))
                 
-                out.write(cropped)
+                # Save frame as image
+                frame_path = os.path.join(frames_dir, f"frame_{frame_count:06d}.jpg")
+                cv2.imwrite(frame_path, cropped, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                
+                frame_count += 1
+                if frame_count % 30 == 0:
+                    self.log(f"  Clip {i+1}: Processed {frame_count} frames...")
             
             cap.release()
-            out.release()
             tracker.release()
             
-            if not os.path.exists(temp_cropped_path):
-                raise Exception("Failed to create cropped video stream.")
+            self.log(f"  Clip {i+1}: Processed {frame_count} frames total")
+            
+            if frame_count == 0:
+                raise Exception("No frames were processed")
+            
+            # 3. Use FFmpeg to create video from frames
+            self.log(f"  Clip {i+1}: Creating video from frames with FFmpeg...")
+            temp_cropped_video = temp_cropped_path.replace('.mp4', '_video.mp4')
+            
+            cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
+            cmd_frames = [
+                cmd_exe, '-y',
+                '-framerate', str(fps),
+                '-i', os.path.join(frames_dir, 'frame_%06d.jpg'),
+                '-c:v', 'libx264',
+                '-pix_fmt', 'yuv420p',
+                '-crf', '23',
+                '-preset', 'medium',
+                temp_cropped_video
+            ]
+            
+            result = subprocess.run(cmd_frames, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if result.returncode != 0:
+                self.log(f"  Clip {i+1}: FFmpeg error: {result.stderr}")
+                raise Exception("FFmpeg failed to create video from frames")
+            
+            # Cleanup frames directory
+            import shutil
+            shutil.rmtree(frames_dir, ignore_errors=True)
+            
+            if not os.path.exists(temp_cropped_video):
+                raise Exception("Failed to create cropped video.")
 
-            # 3. Merge Audio and Finalize
+            # 4. Merge Audio and Finalize
             self.log(f"  Clip {i+1}: Merging audio and finalizing...")
             cmd_merge = [
                 cmd_exe, '-y',
-                '-i', temp_cropped_path,
+                '-i', temp_cropped_video,
                 '-i', temp_raw_path,
-                '-c:v', 'libx264', '-crf', '23', '-preset', 'medium', # Good compression
+                '-c:v', 'copy',  # Copy video stream (already encoded)
                 '-c:a', 'aac', '-b:a', '128k',
                 '-map', '0:v:0', '-map', '1:a:0',
-                '-shortest', # Stop when shortest stream ends
+                '-shortest',
                 out_path
             ]
             subprocess.run(cmd_merge, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
             # Cleanup Temps
-            # Managed by StorageManager cleanup or deleted here to save space during run
             if os.path.exists(temp_raw_path):
                 os.remove(temp_raw_path)
+            if os.path.exists(temp_cropped_video):
+                os.remove(temp_cropped_video)
             if os.path.exists(temp_cropped_path):
                 os.remove(temp_cropped_path)
 

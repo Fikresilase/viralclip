@@ -18,9 +18,9 @@ except ImportError:
 try:
     from ultralytics import YOLO
     YOLO_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError) as e:
     YOLO_AVAILABLE = False
-    print("[FaceTracker] YOLO (Ultralytics) not available.")
+    print(f"[FaceTracker] YOLO (Ultralytics) not available: {e}")
 
 class FaceTracker:
     def __init__(self, target_aspect_ratio=9/16, smoothing_factor=0.1, deadzone_px=50, scene_change_threshold=300):
