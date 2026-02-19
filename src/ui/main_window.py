@@ -5,7 +5,7 @@ main_window.py - Main application window for ViralClips.
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QComboBox, QFrame, QScrollArea, QSizePolicy,
-    QGraphicsDropShadowEffect, QMessageBox, QStackedWidget
+    QGraphicsDropShadowEffect, QMessageBox, QStackedWidget, QPushButton
 )
 from PyQt6.QtCore import Qt, QTimer, QSettings
 from PyQt6.QtGui import QColor, QFont, QPainter, QBrush, QLinearGradient, QPen, QPixmap, QImage
@@ -86,6 +86,7 @@ class MainWindow(QMainWindow):
         body_layout.addWidget(self.hero_widget, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         # Main Interface Card
+        body_layout.addSpacing(8)
         body_layout.addWidget(self._build_main_card(), alignment=Qt.AlignmentFlag.AlignHCenter)
         
         # Results View (Full Width Container)
@@ -131,9 +132,9 @@ class MainWindow(QMainWindow):
         logo_layout = QHBoxLayout()
         logo_layout.setSpacing(12)
 
-        robot_icon = QLabel("🤖")
-        robot_icon.setFont(QFont("Segoe UI Emoji", 24))
-        robot_icon.setFixedSize(32, 32)
+        robot_icon = QLabel("🏭")
+        robot_icon.setFont(QFont("Segoe UI Emoji", 20))
+        robot_icon.setFixedSize(28, 28)
         robot_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         robot_icon.setStyleSheet(f"color: {PRIMARY};")
         logo_layout.addWidget(robot_icon)
@@ -167,7 +168,7 @@ class MainWindow(QMainWindow):
         # Main heading
         heading = QLabel()
         heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        heading.setFont(QFont("Space Grotesk", 42, QFont.Weight.Bold))
+        heading.setFont(QFont("Space Grotesk", 40, QFont.Weight.Bold))
         heading.setText(
             f'<div style="text-align: center; color: white; line-height: 1.15;">'
             f'Turn long videos into<br>'
@@ -180,10 +181,10 @@ class MainWindow(QMainWindow):
         # Subtitle
         subtitle = QLabel("Paste a link, customize your vibe, and let AI do the editing, captioning, and b-roll.")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        subtitle.setFont(QFont("Space Grotesk", 16))
+        subtitle.setFont(QFont("Space Grotesk", 14))
         subtitle.setStyleSheet(f"color: {TEXT_MUTED};")
-        subtitle.setWordWrap(True)
-        subtitle.setMaximumWidth(700)
+        subtitle.setWordWrap(False)
+        subtitle.setMaximumWidth(900)
         layout.addWidget(subtitle, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         return hero
@@ -194,7 +195,7 @@ class MainWindow(QMainWindow):
     def _build_main_card(self) -> QWidget:
         """The large rounded card containing inputs matching web design."""
         self.main_card = QFrame()
-        self.main_card.setFixedWidth(1100)
+        self.main_card.setFixedWidth(720)
         self.main_card.setObjectName("mainCard")
         self.main_card.setStyleSheet(f"""
             QFrame#mainCard {{
@@ -212,7 +213,7 @@ class MainWindow(QMainWindow):
         self.main_card.setGraphicsEffect(shadow)
 
         layout = QVBoxLayout(self.main_card)
-        layout.setContentsMargins(48, 48, 48, 48)
+        layout.setContentsMargins(32, 32, 32, 32)
         layout.setSpacing(0)
 
         # ── Top Row Container (Swappable) ────────────────────────────────
@@ -227,16 +228,13 @@ class MainWindow(QMainWindow):
         input_layout.setSpacing(0)
         
         # Left: URL
-        input_layout.addLayout(self._build_url_section(), stretch=4)
+        input_layout.addLayout(self._build_url_section(), stretch=1)
         
         # Center: Divider
-        div_layout = QVBoxLayout()
-        div_layout.setContentsMargins(0, 0, 0, 0)
-        div_layout.addWidget(self._build_or_divider())
-        input_layout.addLayout(div_layout, stretch=1)
+        input_layout.addWidget(self._build_or_divider())
 
         # Right: Upload
-        input_layout.addLayout(self._build_upload_section(), stretch=4)
+        input_layout.addLayout(self._build_upload_section(), stretch=1)
         
         self.top_layout.addWidget(self.input_view)
         
@@ -276,47 +274,79 @@ class MainWindow(QMainWindow):
     # ── URL Input Section ──────────────────────────────────────────────────
     def _build_url_section(self) -> QVBoxLayout:
         layout = QVBoxLayout()
-        layout.setSpacing(20)
+        layout.setSpacing(12)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # Header
         header = QHBoxLayout()
-        header.setSpacing(12)
-        header.addWidget(IconBadge("🔗", f"rgba(244, 37, 140, 0.1)", PRIMARY, size=32))
+        header.setSpacing(8)
+        header.addWidget(IconBadge("🔗", f"rgba(244, 37, 140, 0.15)", PRIMARY, size=24))
         
         lbl = QLabel("Paste URL")
-        lbl.setFont(QFont("Space Grotesk", 16, QFont.Weight.Bold))
+        lbl.setFont(QFont("Space Grotesk", 13, QFont.Weight.Bold))
         lbl.setStyleSheet("color: white;")
         header.addWidget(lbl)
         header.addStretch()
         layout.addLayout(header)
 
-        # Input
+        # Input Container with icon
+        input_container = QWidget()
+        input_container.setFixedHeight(48)
+        input_layout = QHBoxLayout(input_container)
+        input_layout.setContentsMargins(0, 0, 0, 0)
+        input_layout.setSpacing(0)
+        
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("https://youtube.com/...")
-        self.url_input.setFixedHeight(72)
+        self.url_input.setFixedHeight(48)
         self.url_input.setStyleSheet(f"""
             QLineEdit {{
                 background-color: {SURFACE_INPUT};
                 border: 1px solid {BORDER_DARK};
-                border-radius: 16px;
-                padding-left: 56px;
-                padding-right: 20px;
+                border-radius: 10px;
+                padding-left: 40px;
+                padding-right: 70px;
                 color: {TEXT_WHITE};
-                font-size: 18px;
+                font-size: 13px;
                 font-family: "Space Grotesk";
-                font-weight: 500;
+                font-weight: 400;
             }}
             QLineEdit:focus {{
                 border: 1px solid {PRIMARY};
-                background-color: rgba(59, 35, 48, 0.8);
+                background-color: rgba(59, 35, 48, 0.9);
             }}
             QLineEdit::placeholder {{
-                color: rgba(255, 255, 255, 0.3);
+                color: rgba(186, 156, 171, 0.4);
             }}
         """)
         self.url_input.textChanged.connect(self._on_url_text_changed)
-        layout.addWidget(self.url_input)
+        
+        # Link icon overlay
+        link_icon = QLabel("🔗", self.url_input)
+        link_icon.setFixedSize(16, 16)
+        link_icon.move(14, 16)
+        link_icon.setStyleSheet(f"color: {TEXT_MUTED}; background: transparent; border: none; font-size: 14px;")
+        
+        # OR button on the right
+        or_btn = QPushButton("OR", self.url_input)
+        or_btn.setFixedSize(42, 28)
+        or_btn.setCursor(Qt.CursorShape.ArrowCursor)
+        or_btn.setEnabled(False)
+        or_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: rgba(84, 59, 71, 0.5);
+                color: {TEXT_MUTED};
+                border: 1px solid {BORDER_DARK};
+                border-radius: 6px;
+                font-size: 10px;
+                font-weight: 700;
+                font-family: "Space Grotesk";
+            }}
+        """)
+        or_btn.move(self.url_input.width() - 56, 10)
+        
+        input_layout.addWidget(self.url_input)
+        layout.addWidget(input_container)
 
         # Debounce timer for URL input
         self.url_timer = QTimer()
@@ -327,28 +357,25 @@ class MainWindow(QMainWindow):
         # Helper
         helper = QLabel("Supports YouTube, TikTok, and Instagram Reels")
         helper.setFont(QFont("Space Grotesk", 10))
-        helper.setStyleSheet(f"color: {TEXT_MUTED}; padding-left: 4px;")
+        helper.setStyleSheet(f"color: {TEXT_MUTED}; padding-left: 0px;")
         helper.setWordWrap(True)
         layout.addWidget(helper)
-
-        # Add stretch to match the height of the Upload section if Upload is taller
-        layout.addStretch()
 
         return layout
 
     # ── Upload Section ─────────────────────────────────────────────────────
     def _build_upload_section(self) -> QVBoxLayout:
         layout = QVBoxLayout()
-        layout.setSpacing(20)
+        layout.setSpacing(12)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # Header
         header = QHBoxLayout()
-        header.setSpacing(12)
-        header.addWidget(IconBadge("📄", "rgba(96, 165, 250, 0.1)", BLUE_ACCENT, size=32))
+        header.setSpacing(8)
+        header.addWidget(IconBadge("📄", "rgba(96, 165, 250, 0.15)", BLUE_ACCENT, size=24))
         
         lbl = QLabel("Upload File")
-        lbl.setFont(QFont("Space Grotesk", 16, QFont.Weight.Bold))
+        lbl.setFont(QFont("Space Grotesk", 13, QFont.Weight.Bold))
         lbl.setStyleSheet("color: white;")
         header.addWidget(lbl)
         header.addStretch()
@@ -362,7 +389,8 @@ class MainWindow(QMainWindow):
         return layout
 
     def _build_or_divider(self) -> QWidget:
-        return _OrDivider()
+        divider = _OrDivider()
+        return divider
 
     # ── Smart Transform Card ───────────────────────────────────────────────
     def _build_smart_transform_card(self) -> QFrame:
@@ -608,7 +636,7 @@ class MainWindow(QMainWindow):
 class _OrDivider(QWidget):
     def __init__(self):
         super().__init__()
-        self.setFixedWidth(80)
+        self.setFixedWidth(60)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
 
     def paintEvent(self, a0):
@@ -619,11 +647,11 @@ class _OrDivider(QWidget):
         cx = w // 2
         cy = h // 2
         
-        # Lines with gradient fade
+        # Solid line with gradient fade
         grad = QLinearGradient(cx, 0, cx, h)
         grad.setColorAt(0, QColor(0, 0, 0, 0))
-        grad.setColorAt(0.2, QColor(BORDER_DARK))
-        grad.setColorAt(0.8, QColor(BORDER_DARK))
+        grad.setColorAt(0.35, QColor(BORDER_DARK))
+        grad.setColorAt(0.65, QColor(BORDER_DARK))
         grad.setColorAt(1, QColor(0, 0, 0, 0))
         
         pen = QPen()

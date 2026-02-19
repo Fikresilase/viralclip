@@ -28,11 +28,11 @@ class IconBadge(QLabel):
         super().__init__(icon)
         self.setFixedSize(size, size)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setFont(QFont("Segoe UI Emoji", 14))
+        self.setFont(QFont("Segoe UI Emoji", int(size * 0.5)))
         self.setStyleSheet(f"""
             background-color: {bg_color};
             color: {fg_color};
-            border-radius: 8px;
+            border-radius: {size // 4}px;
         """)
 
 # ── Glow Button ────────────────────────────────────────────────────────────────
@@ -120,22 +120,24 @@ class UpgradeButton(QPushButton):
 class ApiKeyButton(QPushButton):
     """Dark 'API Key' button matching web design."""
     def __init__(self):
-        super().__init__("🔑 API Key")
+        super().__init__("☁️ API Key")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(36)
-        self.setMinimumWidth(110)
+        self.setFixedHeight(40)
+        self.setMinimumWidth(120)
         self.setStyleSheet(f"""
             QPushButton {{
-                background-color: {SURFACE_DARK};
+                background-color: rgba(46, 26, 36, 0.8);
                 color: {TEXT_WHITE};
                 border: 1px solid {BORDER_DARK};
-                border-radius: 8px;
-                font-size: 12px;
-                font-weight: 700;
-                padding: 0 16px;
+                border-radius: 20px;
+                font-size: 13px;
+                font-weight: 600;
+                padding: 0 20px;
+                font-family: "Space Grotesk";
             }}
             QPushButton:hover {{
                 background-color: {SURFACE_INPUT};
+                border-color: rgba(244, 37, 140, 0.3);
             }}
         """)
         self.clicked.connect(self._open_dialog)
@@ -189,40 +191,40 @@ class DropZone(QWidget):
     def __init__(self):
         super().__init__()
         self.setAcceptDrops(True)
-        self.setFixedHeight(100)
+        self.setFixedHeight(48)
         self._hover = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(24, 0, 24, 0)
-        layout.setSpacing(20)
+        layout.setContentsMargins(16, 0, 16, 0)
+        layout.setSpacing(12)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         # Icon
         self.icon_lbl = QLabel("☁️")
-        self.icon_lbl.setFixedSize(48, 48)
+        self.icon_lbl.setFixedSize(28, 28)
         self.icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.icon_lbl.setStyleSheet(f"""
             background-color: rgba(96, 165, 250, 0.1);
             color: {BLUE_ACCENT};
-            border: 1px solid {BORDER_DARK};
-            border-radius: 24px;
-            font-size: 22px;
+            border: 1px solid rgba(96, 165, 250, 0.2);
+            border-radius: 14px;
+            font-size: 14px;
         """)
         layout.addWidget(self.icon_lbl)
         
         # Labels
         txt_layout = QVBoxLayout()
-        txt_layout.setSpacing(4)
+        txt_layout.setSpacing(0)
         txt_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         
         self.t_lbl = QLabel("Drop files or browse")
-        self.t_lbl.setFont(QFont("Space Grotesk", 14, QFont.Weight.Bold))
+        self.t_lbl.setFont(QFont("Space Grotesk", 12, QFont.Weight.Bold))
         self.t_lbl.setStyleSheet(f"color: {TEXT_WHITE};")
         txt_layout.addWidget(self.t_lbl)
         
         self.s_lbl = QLabel("MP4, MOV up to 2GB")
-        self.s_lbl.setFont(QFont("Space Grotesk", 12))
+        self.s_lbl.setFont(QFont("Space Grotesk", 10))
         self.s_lbl.setStyleSheet(f"color: {TEXT_MUTED};")
         txt_layout.addWidget(self.s_lbl)
         
@@ -258,20 +260,20 @@ class DropZone(QWidget):
         # Background
         bg_color = QColor(SURFACE_INPUT)
         if self._hover:
-            bg_color = QColor(SURFACE_INPUT).lighter(120)
+            bg_color = QColor(SURFACE_INPUT).lighter(115)
             
         p.setBrush(QBrush(bg_color))
         p.setPen(Qt.PenStyle.NoPen)
-        p.drawRoundedRect(self.rect(), 16, 16)
+        p.drawRoundedRect(self.rect(), 10, 10)
         
         # Dashed border
         pen = QPen(QColor(BLUE_ACCENT if self._hover else BORDER_DARK))
         pen.setStyle(Qt.PenStyle.DashLine)
         pen.setWidth(2 if self._hover else 1)
-        pen.setDashPattern([8, 8])
+        pen.setDashPattern([5, 5])
         p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRoundedRect(self.rect().adjusted(2, 2, -2, -2), 16, 16)
+        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 10, 10)
 
 # ── Preview Widget ─────────────────────────────────────────────────────────────
 class PreviewWidget(QWidget):
