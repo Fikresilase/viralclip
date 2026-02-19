@@ -5,6 +5,7 @@ theme.py - Color palette and stylesheet constants for ViralClips.
 # ── Color Palette (Matching Web Design) ───────────────────────────────────────
 PRIMARY = "#f4258c"
 PRIMARY_HOVER = "#d61c78"
+GRADIENT_PRIMARY = "qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1, stop:0 #f4258c, stop:1 #ff4081)"
 BG_DARK = "#221019"          # background-dark from web
 SURFACE_DARK = "#2e1a24"     # surface-dark from web
 SURFACE_INPUT = "#3b2330"    # surface-input from web
@@ -37,12 +38,18 @@ QScrollBar:vertical {{
     margin: 0px;
 }}
 QScrollBar::handle:vertical {{
-    background: {BORDER_DARK};
+    background: {SURFACE_INPUT};
     border-radius: 4px;
-    min-height: 20px;
+    min-height: 30px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: {BORDER_DARK};
 }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     height: 0px;
+}}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+    background: none;
 }}
 
 /* ── Labels ───────────────────────────────────────────────────────── */

@@ -47,11 +47,23 @@ class MainWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setStyleSheet(f"QScrollArea {{ background-color: {BG_DARK}; border: none; }}")
+        scroll.setStyleSheet(f"QScrollArea {{ background: transparent; border: none; }}")
         self.setCentralWidget(scroll)
 
         container = QWidget()
-        container.setStyleSheet(f"background-color: {BG_DARK};")
+        container.setObjectName("container")
+        # Radial gradient background
+        container.setStyleSheet(f"""
+            QWidget#container {{
+                background: qradialgradient(
+                    cx: 0.5, cy: 0, radius: 1.2,
+                    fx: 0.5, fy: 0,
+                    stop: 0 #3d1e2e,
+                    stop: 0.6 {BG_DARK},
+                    stop: 1 {BG_DARK}
+                );
+            }}
+        """)
         scroll.setWidget(container)
 
         # Root layout for the whole page
@@ -282,20 +294,25 @@ class MainWindow(QMainWindow):
         # Input
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("https://youtube.com/...")
-        self.url_input.setFixedHeight(64)
+        self.url_input.setFixedHeight(72)
         self.url_input.setStyleSheet(f"""
             QLineEdit {{
                 background-color: {SURFACE_INPUT};
                 border: 1px solid {BORDER_DARK};
-                border-radius: 12px;
-                padding-left: 48px;
-                padding-right: 16px;
+                border-radius: 16px;
+                padding-left: 56px;
+                padding-right: 20px;
                 color: {TEXT_WHITE};
-                font-size: 16px;
+                font-size: 18px;
                 font-family: "Space Grotesk";
+                font-weight: 500;
             }}
             QLineEdit:focus {{
                 border: 1px solid {PRIMARY};
+                background-color: rgba(59, 35, 48, 0.8);
+            }}
+            QLineEdit::placeholder {{
+                color: rgba(255, 255, 255, 0.3);
             }}
         """)
         self.url_input.textChanged.connect(self._on_url_text_changed)
@@ -591,7 +608,7 @@ class MainWindow(QMainWindow):
 class _OrDivider(QWidget):
     def __init__(self):
         super().__init__()
-        self.setFixedWidth(60)
+        self.setFixedWidth(80)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
 
     def paintEvent(self, a0):
@@ -600,16 +617,33 @@ class _OrDivider(QWidget):
         
         w, h = self.width(), self.height()
         cx = w // 2
+        cy = h // 2
         
-        # Lines
-        p.setPen(QPen(QColor(BORDER_DARK), 1))
-        p.drawLine(cx, 10, cx, h // 2 - 20)
-        p.drawLine(cx, h // 2 + 20, cx, h - 10)
+        # Lines with gradient fade
+        grad = QLinearGradient(cx, 0, cx, h)
+        grad.setColorAt(0, QColor(0, 0, 0, 0))
+        grad.setColorAt(0.2, QColor(BORDER_DARK))
+        grad.setColorAt(0.8, QColor(BORDER_DARK))
+        grad.setColorAt(1, QColor(0, 0, 0, 0))
+        
+        pen = QPen()
+        pen.setBrush(QBrush(grad))
+        pen.setWidth(1)
+        p.setPen(pen)
+        p.drawLine(cx, 0, cx, h)
         
         # Badge
+        # Clear background behind text
+        p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(QColor(SURFACE_DARK)))
-        p.drawEllipse(cx - 15, h // 2 - 15, 30, 30)
+        p.drawEllipse(cx - 16, cy - 16, 32, 32)
         
+        # Border for badge
+        p.setPen(QPen(QColor(BORDER_DARK), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(cx - 16, cy - 16, 32, 32)
+        
+        # Text
         p.setPen(QColor(TEXT_MUTED))
-        p.setFont(QFont("Inter", 8, QFont.Weight.Bold))
+        p.setFont(QFont("Space Grotesk", 9, QFont.Weight.Bold))
         p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "OR")

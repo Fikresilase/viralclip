@@ -12,12 +12,12 @@ from PyQt6.QtCore import (
     QRectF, pyqtProperty
 )
 from PyQt6.QtGui import (
-    QColor, QPainter, QBrush, QPen, QFont, QDragEnterEvent, QDropEvent, 
-    QPixmap, QPainterPath
+    QColor, QPainter, QBrush, QPen, QFont, QDragEnterEvent, QDropEvent,
+    QPixmap, QPainterPath, QLinearGradient
 )
 
 from src.ui.theme import (
-    PRIMARY, PRIMARY_HOVER, BG_DARK, SURFACE_DARK, SURFACE_INPUT,
+    PRIMARY, PRIMARY_HOVER, GRADIENT_PRIMARY, BG_DARK, SURFACE_DARK, SURFACE_INPUT,
     BORDER_DARK, TEXT_MUTED, TEXT_WHITE, BLUE_ACCENT, BLUE_ACCENT_BG
 )
 
@@ -44,38 +44,45 @@ class GlowButton(QPushButton):
         self.setFixedHeight(64)
         
         self.shadow = QGraphicsDropShadowEffect(self)
-        self.shadow.setBlurRadius(40)
+        self.shadow.setBlurRadius(30)
         self.shadow.setColor(QColor(244, 37, 140, 80))
-        self.shadow.setOffset(0, 0)
+        self.shadow.setOffset(0, 4)
         self.setGraphicsEffect(self.shadow)
         
-        self._apply_style(PRIMARY)
-
-    def _apply_style(self, bg):
         self.setStyleSheet(f"""
             QPushButton {{
-                background-color: {bg};
+                background: {GRADIENT_PRIMARY};
                 color: white;
-                border-radius: 12px;
-                font-weight: 700;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 16px;
+                font-weight: 800;
                 font-size: 18px;
                 letter-spacing: 0.5px;
+                font-family: "Space Grotesk";
             }}
             QPushButton:hover {{
                 background-color: {PRIMARY_HOVER};
+                border: 1px solid rgba(255, 255, 255, 0.3);
+            }}
+            QPushButton:pressed {{
+                margin-top: 2px;
+                background-color: {PRIMARY};
             }}
             QPushButton:disabled {{
-                background-color: #3f3f46;
+                background: #3f3f46;
                 color: #71717a;
+                border: none;
             }}
         """)
 
     def enterEvent(self, event):
         self.shadow.setBlurRadius(50)
+        self.shadow.setColor(QColor(244, 37, 140, 120))
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        self.shadow.setBlurRadius(40)
+        self.shadow.setBlurRadius(30)
+        self.shadow.setColor(QColor(244, 37, 140, 80))
         super().leaveEvent(event)
 
 # ── Upgrade Button ─────────────────────────────────────────────────────────────
@@ -84,27 +91,28 @@ class UpgradeButton(QPushButton):
     def __init__(self):
         super().__init__("⚡ Upgrade to pro")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(36)
-        self.setMinimumWidth(150)
+        self.setFixedHeight(40)
+        self.setMinimumWidth(160)
         
         # Add glow effect
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(25)
-        shadow.setColor(QColor(244, 37, 140, 100))
-        shadow.setOffset(0, 0)
+        shadow.setBlurRadius(20)
+        shadow.setColor(QColor(244, 37, 140, 80))
+        shadow.setOffset(0, 2)
         self.setGraphicsEffect(shadow)
         
         self.setStyleSheet(f"""
             QPushButton {{
-                background-color: {PRIMARY};
+                background: {GRADIENT_PRIMARY};
                 color: white;
-                border-radius: 8px;
+                border-radius: 20px;
                 font-weight: 700;
-                font-size: 12px;
-                padding: 0 16px;
+                font-size: 13px;
+                padding: 0 20px;
+                border: 1px solid rgba(255, 255, 255, 0.2);
             }}
             QPushButton:hover {{
-                background-color: {PRIMARY_HOVER};
+                margin-top: -1px;
             }}
         """)
 
@@ -181,51 +189,52 @@ class DropZone(QWidget):
     def __init__(self):
         super().__init__()
         self.setAcceptDrops(True)
-        self.setFixedHeight(88)
+        self.setFixedHeight(100)
         self._hover = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 0, 16, 0)
-        layout.setSpacing(16)
+        layout.setContentsMargins(24, 0, 24, 0)
+        layout.setSpacing(20)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         # Icon
         self.icon_lbl = QLabel("☁️")
-        self.icon_lbl.setFixedSize(40, 40)
+        self.icon_lbl.setFixedSize(48, 48)
         self.icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.icon_lbl.setStyleSheet(f"""
-            background-color: {SURFACE_INPUT};
+            background-color: rgba(96, 165, 250, 0.1);
             color: {BLUE_ACCENT};
             border: 1px solid {BORDER_DARK};
-            border-radius: 20px;
-            font-size: 18px;
+            border-radius: 24px;
+            font-size: 22px;
         """)
         layout.addWidget(self.icon_lbl)
         
         # Labels
         txt_layout = QVBoxLayout()
-        txt_layout.setSpacing(2)
+        txt_layout.setSpacing(4)
         txt_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         
         self.t_lbl = QLabel("Drop files or browse")
-        self.t_lbl.setFont(QFont("Space Grotesk", 12, QFont.Weight.Medium))
+        self.t_lbl.setFont(QFont("Space Grotesk", 14, QFont.Weight.Bold))
+        self.t_lbl.setStyleSheet(f"color: {TEXT_WHITE};")
         txt_layout.addWidget(self.t_lbl)
         
         self.s_lbl = QLabel("MP4, MOV up to 2GB")
-        self.s_lbl.setFont(QFont("Space Grotesk", 10))
+        self.s_lbl.setFont(QFont("Space Grotesk", 12))
         self.s_lbl.setStyleSheet(f"color: {TEXT_MUTED};")
         txt_layout.addWidget(self.s_lbl)
         
         layout.addLayout(txt_layout)
 
     def dragEnterEvent(self, e):
-        if e.mimeData().hasUrls(): 
+        if e.mimeData().hasUrls():
             e.acceptProposedAction()
             self._hover = True
             self.update()
             
-    def dragLeaveEvent(self, e): 
+    def dragLeaveEvent(self, e):
         self._hover = False
         self.update()
         
@@ -233,13 +242,13 @@ class DropZone(QWidget):
         self._hover = False
         self.update()
         urls = e.mimeData().urls()
-        if urls: 
+        if urls:
             self.fileDropped.emit(urls[0].toLocalFile())
 
     def mousePressEvent(self, e):
         from PyQt6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getOpenFileName(self, "Select Video", "", "Video (*.mp4 *.mov)")
-        if path: 
+        if path:
             self.fileDropped.emit(path)
 
     def paintEvent(self, e):
@@ -247,17 +256,22 @@ class DropZone(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         
         # Background
-        p.setBrush(QBrush(QColor(SURFACE_INPUT) if not self._hover else QColor("#3b2330")))
+        bg_color = QColor(SURFACE_INPUT)
+        if self._hover:
+            bg_color = QColor(SURFACE_INPUT).lighter(120)
+            
+        p.setBrush(QBrush(bg_color))
         p.setPen(Qt.PenStyle.NoPen)
-        p.drawRoundedRect(self.rect(), 12, 12)
+        p.drawRoundedRect(self.rect(), 16, 16)
         
         # Dashed border
         pen = QPen(QColor(BLUE_ACCENT if self._hover else BORDER_DARK))
         pen.setStyle(Qt.PenStyle.DashLine)
-        pen.setWidth(2)
+        pen.setWidth(2 if self._hover else 1)
+        pen.setDashPattern([8, 8])
         p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 12, 12)
+        p.drawRoundedRect(self.rect().adjusted(2, 2, -2, -2), 16, 16)
 
 # ── Preview Widget ─────────────────────────────────────────────────────────────
 class PreviewWidget(QWidget):
@@ -271,16 +285,27 @@ class PreviewWidget(QWidget):
         self._overlay.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
         l = QVBoxLayout(self._overlay)
-        l.setContentsMargins(24, 24, 24, 24)
+        l.setContentsMargins(32, 32, 32, 32)
         
         # Close btn
         row1 = QHBoxLayout()
         row1.addStretch()
         self.c_btn = QPushButton("✕", self._overlay)
-        self.c_btn.setFixedSize(32, 32)
+        self.c_btn.setFixedSize(36, 36)
         self.c_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.c_btn.clicked.connect(self.removeClicked.emit)
-        self.c_btn.setStyleSheet("background: rgba(0,0,0,0.5); color: white; border-radius: 16px; font-weight: bold;")
+        self.c_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(0,0,0,0.6);
+                color: white;
+                border-radius: 18px;
+                font-weight: bold;
+                border: 1px solid rgba(255,255,255,0.1);
+            }}
+            QPushButton:hover {{
+                background: {PRIMARY};
+            }}
+        """)
         row1.addWidget(self.c_btn)
         l.addLayout(row1)
         
@@ -288,25 +313,42 @@ class PreviewWidget(QWidget):
         
         # Center Play Icon
         pi = QLabel("▶")
-        pi.setFixedSize(60, 60)
+        pi.setFixedSize(80, 80)
         pi.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pi.setStyleSheet(f"background: rgba(244,37,140,0.2); color: {PRIMARY}; border: 2px solid {PRIMARY}; border-radius: 30px; font-size: 20px; padding-left: 4px;")
+        pi.setStyleSheet(f"""
+            background: rgba(244,37,140,0.25);
+            color: white;
+            border: 2px solid {PRIMARY};
+            border-radius: 40px;
+            font-size: 28px;
+            padding-left: 6px;
+        """)
         l.addWidget(pi, alignment=Qt.AlignmentFlag.AlignCenter)
         
         l.addStretch()
         
         # Title/Meta
+        meta_container = QWidget()
+        meta_container.setStyleSheet("background: transparent;")
+        meta_l = QVBoxLayout(meta_container)
+        meta_l.setContentsMargins(0, 0, 0, 0)
+        
         self.t_lbl = QLabel(self._overlay)
-        self.t_lbl.setFont(QFont("Inter", 18, QFont.Weight.Bold))
-        l.addWidget(self.t_lbl)
+        self.t_lbl.setFont(QFont("Space Grotesk", 20, QFont.Weight.Bold))
+        self.t_lbl.setStyleSheet("color: white; background: transparent;")
+        self.t_lbl.setWordWrap(True)
+        meta_l.addWidget(self.t_lbl)
         
         self.m_lbl = QLabel("10:45 duration • 1080p", self._overlay)
-        self.m_lbl.setStyleSheet("color: #94a3b8;")
-        l.addWidget(self.m_lbl)
+        self.m_lbl.setFont(QFont("Space Grotesk", 14))
+        self.m_lbl.setStyleSheet(f"color: {TEXT_MUTED}; background: transparent;")
+        meta_l.addWidget(self.m_lbl)
+        
+        l.addWidget(meta_container)
         
         self._loading_label = QLabel("Analyzing Content...", self)
         self._loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._loading_label.setStyleSheet("color: #94a3b8;")
+        self._loading_label.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 16px; font-family: 'Space Grotesk';")
         self._loading_label.hide()
 
     def set_loading(self, l):
@@ -338,13 +380,30 @@ class PreviewWidget(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()), 16, 16)
+        path.addRoundedRect(QRectF(self.rect()), 24, 24)
         p.setClipPath(path)
         p.setBrush(QBrush(QColor(SURFACE_DARK)))
+        p.setPen(Qt.PenStyle.NoPen)
         p.drawRect(self.rect())
+        
         if self._pixmap:
             s = self._pixmap.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
-            p.drawPixmap((self.width()-s.width())//2, (self.height()-s.height())//2, s)
+            # Center crop
+            x = (self.width() - s.width()) // 2
+            y = (self.height() - s.height()) // 2
+            p.drawPixmap(x, y, s)
+            
+            # Gradient Overlay for text readability
+            grad = QLinearGradient(0, self.height() * 0.5, 0, self.height())
+            grad.setColorAt(0, QColor(0, 0, 0, 0))
+            grad.setColorAt(1, QColor(0, 0, 0, 200))
+            p.fillRect(self.rect(), grad)
+        else:
+            # Draw placeholder pattern or gradient
+            grad = QLinearGradient(0, 0, 0, self.height())
+            grad.setColorAt(0, QColor(SURFACE_INPUT))
+            grad.setColorAt(1, QColor(BG_DARK))
+            p.fillRect(self.rect(), grad)
 
 # ── API Key Dialog ─────────────────────────────────────────────────────────────
 class ApiKeyDialog(QDialog):

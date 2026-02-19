@@ -4,9 +4,9 @@ from PyQt6.QtWidgets import (
     QFrame, QGridLayout, QFileDialog, QGraphicsDropShadowEffect
 )
 from PyQt6.QtCore import Qt, QSize, QUrl
-from PyQt6.QtGui import QPixmap, QIcon, QFont, QColor, QDesktopServices
+from PyQt6.QtGui import QPixmap, QIcon, QFont, QColor, QDesktopServices, QPainter, QLinearGradient, QBrush
 
-from src.ui.theme import BG_DARK, SURFACE_DARK, PRIMARY, TEXT_WHITE, TEXT_MUTED, BORDER_DARK, SURFACE_INPUT
+from src.ui.theme import BG_DARK, SURFACE_DARK, PRIMARY, PRIMARY_HOVER, TEXT_WHITE, TEXT_MUTED, BORDER_DARK, SURFACE_INPUT
 
 class ResultCard(QFrame):
     def __init__(self, data):
@@ -14,12 +14,12 @@ class ResultCard(QFrame):
         self.data = data
         
         # Proper sizing for 9:16 aspect ratio shorts
-        card_width = 220
-        thumb_height = int(card_width * 16 / 9)  # 9:16 aspect ratio = ~391px
+        card_width = 240
+        thumb_height = int(card_width * 16 / 9)  # 9:16 aspect ratio
         
-        self.setFixedWidth(card_width)
-        self.setMinimumHeight(thumb_height + 120)  # thumb + info section
+        self.setFixedSize(card_width, thumb_height)
         
+        # Main container styling
         self.setStyleSheet(f"""
             QFrame {{
                 background-color: {SURFACE_DARK};
@@ -29,55 +29,77 @@ class ResultCard(QFrame):
             QFrame:hover {{ border-color: {PRIMARY}; }}
         """)
         
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 12)
-        layout.setSpacing(12)
-        
-        # Thumbnail (Vertical 9:16)
-        self.thumb = QLabel()
-        self.thumb.setFixedSize(card_width, thumb_height)
-        self.thumb.setStyleSheet("background-color: #000; border-top-left-radius: 16px; border-top-right-radius: 16px;")
-        self.thumb.setScaledContents(False)
-        self.thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Background Image (Thumbnail)
+        self.bg_label = QLabel(self)
+        self.bg_label.setFixedSize(card_width, thumb_height)
+        self.bg_label.setStyleSheet("border-radius: 16px; background-color: #000;")
+        self.bg_label.setScaledContents(True)
         
         pix = QPixmap(data['thumb'])
         if not pix.isNull():
-            self.thumb.setPixmap(pix.scaled(card_width, thumb_height, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation))
-        layout.addWidget(self.thumb)
+            # Crop to aspect ratio if needed, or just scale
+            scaled = pix.scaled(
+                card_width, thumb_height,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            # Center crop logic could go here, but simple scaling is okay for now
+            self.bg_label.setPixmap(scaled)
+            
+        # Overlay Container (Gradient + Content)
+        self.overlay = QWidget(self)
+        self.overlay.setFixedSize(card_width, thumb_height)
+        self.overlay.setStyleSheet("background: transparent; border-radius: 16px;")
         
-        # Info section with proper spacing
-        info_container = QWidget()
-        info_l = QVBoxLayout(info_container)
-        info_l.setContentsMargins(12, 4, 12, 0)
-        info_l.setSpacing(6)
-
+        overlay_layout = QVBoxLayout(self.overlay)
+        overlay_layout.setContentsMargins(16, 16, 16, 16)
+        
+        # Top: Viral Score Badge
+        top_row = QHBoxLayout()
+        top_row.addStretch()
+        
+        score_badge = QLabel(f"📈 {data.get('score', '95%')}")
+        score_badge.setFixedHeight(24)
+        score_badge.setStyleSheet(f"""
+            background-color: rgba(0, 0, 0, 0.6);
+            color: {PRIMARY};
+            border: 1px solid {PRIMARY};
+            border-radius: 12px;
+            padding: 0 8px;
+            font-family: "Space Grotesk";
+            font-weight: bold;
+            font-size: 11px;
+        """)
+        top_row.addWidget(score_badge)
+        overlay_layout.addLayout(top_row)
+        
+        overlay_layout.addStretch()
+        
+        # Bottom: Title + Actions
+        bottom_container = QWidget()
+        bottom_container.setStyleSheet("background: transparent;")
+        bottom_l = QVBoxLayout(bottom_container)
+        bottom_l.setContentsMargins(0, 0, 0, 0)
+        bottom_l.setSpacing(8)
+        
+        # Title
         title = QLabel(data['title'])
-        title.setFont(QFont("Space Grotesk", 11, QFont.Weight.DemiBold))
-        title.setStyleSheet(f"color: {TEXT_WHITE};")
+        title.setFont(QFont("Space Grotesk", 12, QFont.Weight.Bold))
+        title.setStyleSheet("color: white;")
         title.setWordWrap(True)
-        title.setMaximumHeight(40)
-        info_l.addWidget(title)
+        title.setMaximumHeight(60)
         
-        score_l = QHBoxLayout()
-        score_l.setSpacing(6)
-        score_l.setContentsMargins(0, 0, 0, 0)
+        # Add shadow effect to title for better readability
+        shadow = QGraphicsDropShadowEffect(title)
+        shadow.setBlurRadius(4)
+        shadow.setColor(QColor(0, 0, 0, 200))
+        shadow.setOffset(1, 1)
+        title.setGraphicsEffect(shadow)
         
-        flash = QLabel("📈")
-        flash.setStyleSheet(f"font-size: 12px;")
-        score_l.addWidget(flash)
+        bottom_l.addWidget(title)
         
-        score = QLabel(f"{data.get('score', '95%')} Viral Score")
-        score.setFont(QFont("Space Grotesk", 10, QFont.Weight.Bold))
-        score.setStyleSheet(f"color: {PRIMARY};")
-        score_l.addWidget(score)
-        score_l.addStretch()
-        info_l.addLayout(score_l)
-
-        layout.addWidget(info_container)
-        
-        # Action buttons with proper styling
+        # Buttons Row
         btns = QHBoxLayout()
-        btns.setContentsMargins(12, 8, 12, 0)
         btns.setSpacing(8)
         
         p_btn = QPushButton("▶ Play")
@@ -85,16 +107,16 @@ class ResultCard(QFrame):
         p_btn.setFixedHeight(32)
         p_btn.setStyleSheet(f"""
             QPushButton {{
-                background: white; 
-                color: black; 
-                border-radius: 6px; 
-                font-size: 11px; 
-                font-weight: bold;
-                font-family: "Space Grotesk";
-            }}
-            QPushButton:hover {{
                 background: {PRIMARY};
                 color: white;
+                border-radius: 8px;
+                font-size: 12px;
+                font-weight: bold;
+                font-family: "Space Grotesk";
+                border: none;
+            }}
+            QPushButton:hover {{
+                background: {PRIMARY_HOVER};
             }}
         """)
         p_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(data['path'])))
@@ -104,22 +126,38 @@ class ResultCard(QFrame):
         s_btn.setFixedSize(32, 32)
         s_btn.setStyleSheet(f"""
             QPushButton {{
-                background: {SURFACE_INPUT}; 
-                color: white; 
-                border: 1px solid {BORDER_DARK};
-                border-radius: 6px;
+                background: rgba(255, 255, 255, 0.2);
+                color: white;
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                border-radius: 8px;
                 font-size: 14px;
             }}
             QPushButton:hover {{
-                background: white;
-                color: black;
+                background: rgba(255, 255, 255, 0.4);
             }}
         """)
         s_btn.clicked.connect(self._save)
         
         btns.addWidget(p_btn, stretch=1)
         btns.addWidget(s_btn)
-        layout.addLayout(btns)
+        bottom_l.addLayout(btns)
+        
+        overlay_layout.addWidget(bottom_container)
+
+    def paintEvent(self, event):
+        # Draw the gradient overlay manually since stylesheet gradients on widgets can be tricky with transparency
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Gradient from bottom to middle
+        grad = QLinearGradient(0, self.height(), 0, self.height() * 0.4)
+        grad.setColorAt(0, QColor(0, 0, 0, 240))
+        grad.setColorAt(1, QColor(0, 0, 0, 0))
+        
+        p.setBrush(QBrush(grad))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawRoundedRect(self.rect(), 16, 16)
 
     def _save(self):
         dest, _ = QFileDialog.getSaveFileName(self, "Save Video", self.data['title']+".mp4", "Video (*.mp4)")
