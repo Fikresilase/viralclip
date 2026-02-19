@@ -38,7 +38,6 @@ class MainWindow(QMainWindow):
         self.current_is_local = False
         
         self.setWindowTitle("Content Factory — AI Video Generator")
-
         self.setMinimumSize(1000, 700)
         self.resize(1200, 850)
         self.setStyleSheet(GLOBAL_STYLESHEET)
@@ -66,44 +65,8 @@ class MainWindow(QMainWindow):
         # ── 2. Body (Centered Content) ────────────────────────────────────
         body = QWidget()
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(24, 40, 24, 40)
-        body_layout.setSpacing(32)
-        body_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-
-        # Hero heading
-        body_layout.addWidget(self._build_hero(), alignment=Qt.AlignmentFlag.AlignHCenter)
-
-        # Main Interface Card
-        body_layout.addWidget(self._build_main_card(), alignment=Qt.AlignmentFlag.AlignHCenter)
-        self.setMinimumSize(1000, 700)
-        self.resize(1200, 850)
-        self.setStyleSheet(GLOBAL_STYLESHEET)
-
-        # ── Central Scroll Area ───────────────────────────────────────────
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setStyleSheet(f"QScrollArea {{ background-color: {BG_DARK}; border: none; }}")
-        self.setCentralWidget(scroll)
-
-        container = QWidget()
-        container.setStyleSheet(f"background-color: {BG_DARK};")
-        scroll.setWidget(container)
-
-        # Root layout for the whole page
-        root_layout = QVBoxLayout(container)
-        root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(0)
-
-        # ── 1. Header ─────────────────────────────────────────────────────
-        root_layout.addWidget(self._build_header())
-
-        # ── 2. Body (Centered Content) ────────────────────────────────────
-        body = QWidget()
-        body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(24, 40, 24, 40)
-        body_layout.setSpacing(32)
+        body_layout.setContentsMargins(24, 32, 24, 32)
+        body_layout.setSpacing(40)
         body_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
 
         # Hero heading
@@ -121,25 +84,34 @@ class MainWindow(QMainWindow):
     #  HEADER
     # ══════════════════════════════════════════════════════════════════════
     def _build_header(self) -> QWidget:
-        """Sticky top bar with logo and buttons."""
+        """Sticky top bar with logo and buttons matching web design."""
         header = QFrame()
-        header.setFixedHeight(70)
-        header.setStyleSheet(f"background-color: {BG_DARK}; border: none;")
+        header.setFixedHeight(64)
+        header.setStyleSheet(f"""
+            QFrame {{
+                background-color: {BG_DARK};
+                border: none;
+                border-bottom: 1px solid {BORDER_DARK};
+            }}
+        """)
 
         layout = QHBoxLayout(header)
-        layout.setContentsMargins(32, 0, 32, 0)
-        layout.setSpacing(12)
+        layout.setContentsMargins(48, 0, 48, 0)
+        layout.setSpacing(24)
 
         # Logo Section
         logo_layout = QHBoxLayout()
-        logo_layout.setSpacing(10)
+        logo_layout.setSpacing(12)
 
         robot_icon = QLabel("🤖")
-        robot_icon.setFont(QFont("Segoe UI Emoji", 20))
+        robot_icon.setFont(QFont("Segoe UI Emoji", 24))
+        robot_icon.setFixedSize(32, 32)
+        robot_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        robot_icon.setStyleSheet(f"color: {PRIMARY};")
         logo_layout.addWidget(robot_icon)
 
         title = QLabel("Content Factory")
-        title.setFont(QFont("Inter", 16, QFont.Weight.Bold))
+        title.setFont(QFont("Space Grotesk", 18, QFont.Weight.Bold))
         title.setStyleSheet(f"color: white;")
         logo_layout.addWidget(title)
 
@@ -156,20 +128,20 @@ class MainWindow(QMainWindow):
     #  HERO HEADING
     # ══════════════════════════════════════════════════════════════════════
     def _build_hero(self) -> QWidget:
-        """Centered heading + subtitle."""
+        """Centered heading + subtitle matching web design."""
         hero = QWidget()
-        hero.setMaximumWidth(820)
+        hero.setMaximumWidth(900)
         layout = QVBoxLayout(hero)
-        layout.setContentsMargins(0, 40, 0, 0)
-        layout.setSpacing(16)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Main heading
         heading = QLabel()
         heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        heading.setFont(QFont("Inter", 32, QFont.Weight.Bold))
+        heading.setFont(QFont("Space Grotesk", 42, QFont.Weight.Bold))
         heading.setText(
-            f'<div style="text-align: center; color: white; line-height: 1.2;">'
+            f'<div style="text-align: center; color: white; line-height: 1.15;">'
             f'Turn long videos into<br>'
             f'<span style="color: {PRIMARY};">viral Shorts</span> instantly.'
             f'</div>'
@@ -180,10 +152,10 @@ class MainWindow(QMainWindow):
         # Subtitle
         subtitle = QLabel("Paste a link, customize your vibe, and let AI do the editing, captioning, and b-roll.")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        subtitle.setFont(QFont("Inter", 12))
-        subtitle.setStyleSheet("color: #94a3b8;")
+        subtitle.setFont(QFont("Space Grotesk", 16))
+        subtitle.setStyleSheet(f"color: {TEXT_MUTED};")
         subtitle.setWordWrap(True)
-        subtitle.setFixedWidth(600)
+        subtitle.setMaximumWidth(700)
         layout.addWidget(subtitle, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         return hero
@@ -192,27 +164,27 @@ class MainWindow(QMainWindow):
     #  MAIN CARD
     # ══════════════════════════════════════════════════════════════════════
     def _build_main_card(self) -> QWidget:
-        """The large rounded card containing inputs."""
+        """The large rounded card containing inputs matching web design."""
         card = QFrame()
-        card.setFixedWidth(900)
+        card.setFixedWidth(1100)
         card.setObjectName("mainCard")
         card.setStyleSheet(f"""
             QFrame#mainCard {{
                 background-color: {SURFACE_DARK};
                 border: 1px solid {BORDER_DARK};
-                border-radius: 20px;
+                border-radius: 24px;
             }}
         """)
 
         # Shadow
         shadow = QGraphicsDropShadowEffect(card)
-        shadow.setBlurRadius(50)
-        shadow.setColor(QColor(0, 0, 0, 100))
-        shadow.setOffset(0, 8)
+        shadow.setBlurRadius(80)
+        shadow.setColor(QColor(0, 0, 0, 150))
+        shadow.setOffset(0, 10)
         card.setGraphicsEffect(shadow)
 
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(32, 40, 32, 40)
+        layout.setContentsMargins(48, 48, 48, 48)
         layout.setSpacing(0)
 
         # ── Top Row Container (Swappable) ────────────────────────────────
@@ -280,16 +252,17 @@ class MainWindow(QMainWindow):
     # ── URL Input Section ──────────────────────────────────────────────────
     def _build_url_section(self) -> QVBoxLayout:
         layout = QVBoxLayout()
-        layout.setSpacing(16)
+        layout.setSpacing(20)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # Header
         header = QHBoxLayout()
-        header.setSpacing(10)
-        header.addWidget(IconBadge("🔗", "rgba(244, 37, 140, 0.1)", PRIMARY, size=32))
+        header.setSpacing(12)
+        header.addWidget(IconBadge("🔗", f"rgba(244, 37, 140, 0.1)", PRIMARY, size=32))
         
         lbl = QLabel("Paste URL")
-        lbl.setFont(QFont("Inter", 13, QFont.Weight.Bold))
+        lbl.setFont(QFont("Space Grotesk", 16, QFont.Weight.Bold))
+        lbl.setStyleSheet("color: white;")
         header.addWidget(lbl)
         header.addStretch()
         layout.addLayout(header)
@@ -297,15 +270,17 @@ class MainWindow(QMainWindow):
         # Input
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("https://youtube.com/...")
-        self.url_input.setFixedHeight(50)
+        self.url_input.setFixedHeight(64)
         self.url_input.setStyleSheet(f"""
             QLineEdit {{
-                background-color: rgba(0, 0, 0, 0.2);
+                background-color: {SURFACE_INPUT};
                 border: 1px solid {BORDER_DARK};
                 border-radius: 12px;
-                padding-left: 16px;
+                padding-left: 48px;
+                padding-right: 16px;
                 color: {TEXT_WHITE};
-                font-size: 14px;
+                font-size: 16px;
+                font-family: "Space Grotesk";
             }}
             QLineEdit:focus {{
                 border: 1px solid {PRIMARY};
@@ -322,8 +297,8 @@ class MainWindow(QMainWindow):
 
         # Helper
         helper = QLabel("Supports YouTube, TikTok, and Instagram Reels")
-        helper.setFont(QFont("Inter", 9))
-        helper.setStyleSheet("color: #64748b;")
+        helper.setFont(QFont("Space Grotesk", 10))
+        helper.setStyleSheet(f"color: {TEXT_MUTED}; padding-left: 4px;")
         helper.setWordWrap(True)
         layout.addWidget(helper)
 
@@ -335,16 +310,17 @@ class MainWindow(QMainWindow):
     # ── Upload Section ─────────────────────────────────────────────────────
     def _build_upload_section(self) -> QVBoxLayout:
         layout = QVBoxLayout()
-        layout.setSpacing(16)
+        layout.setSpacing(20)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # Header
         header = QHBoxLayout()
-        header.setSpacing(10)
+        header.setSpacing(12)
         header.addWidget(IconBadge("📄", "rgba(96, 165, 250, 0.1)", BLUE_ACCENT, size=32))
         
         lbl = QLabel("Upload File")
-        lbl.setFont(QFont("Inter", 13, QFont.Weight.Bold))
+        lbl.setFont(QFont("Space Grotesk", 16, QFont.Weight.Bold))
+        lbl.setStyleSheet("color: white;")
         header.addWidget(lbl)
         header.addStretch()
         layout.addLayout(header)
@@ -362,37 +338,38 @@ class MainWindow(QMainWindow):
     # ── Smart Transform Card ───────────────────────────────────────────────
     def _build_smart_transform_card(self) -> QFrame:
         card = QFrame()
-        card.setFixedHeight(70)
+        card.setFixedHeight(80)
         card.setStyleSheet(f"""
             QFrame {{
-                background-color: {SURFACE_INPUT};
+                background-color: rgba(59, 35, 48, 0.3);
                 border: 1px solid {BORDER_DARK};
                 border-radius: 12px;
             }}
-            QFrame:hover {{ border-color: {PRIMARY}; }}
+            QFrame:hover {{ border-color: rgba(244, 37, 140, 0.3); }}
         """)
         
         layout = QHBoxLayout(card)
-        layout.setContentsMargins(16, 0, 16, 0)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 0, 20, 0)
+        layout.setSpacing(16)
 
         icon = QLabel("✨")
-        icon.setFixedSize(32, 32)
+        icon.setFixedSize(40, 40)
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setStyleSheet(f"background-color: {BG_DARK}; border-radius: 8px; font-size: 14px;")
+        icon.setStyleSheet(f"background-color: {BG_DARK}; border-radius: 8px; font-size: 18px;")
         layout.addWidget(icon)
 
         text_layout = QVBoxLayout()
-        text_layout.setSpacing(0)
+        text_layout.setSpacing(2)
         text_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         
         title = QLabel("Smart Transform")
-        title.setFont(QFont("Inter", 11, QFont.Weight.Bold))
+        title.setFont(QFont("Space Grotesk", 13, QFont.Weight.Medium))
+        title.setStyleSheet("color: white;")
         text_layout.addWidget(title)
 
-        desc = QLabel("Reduce copyright strikes")
-        desc.setFont(QFont("Inter", 9))
-        desc.setStyleSheet("color: #64748b;")
+        desc = QLabel("Reduce similarity & copyright strikes")
+        desc.setFont(QFont("Space Grotesk", 10))
+        desc.setStyleSheet(f"color: {TEXT_MUTED};")
         text_layout.addWidget(desc)
         
         layout.addLayout(text_layout)
@@ -406,38 +383,40 @@ class MainWindow(QMainWindow):
     # ── Language Card ──────────────────────────────────────────────────────
     def _build_language_card(self) -> QFrame:
         card = QFrame()
-        card.setFixedHeight(70)
+        card.setFixedHeight(80)
         card.setStyleSheet(f"""
             QFrame {{
-                background-color: {SURFACE_INPUT};
+                background-color: rgba(59, 35, 48, 0.3);
                 border: 1px solid {BORDER_DARK};
                 border-radius: 12px;
             }}
-            QFrame:hover {{ border-color: {PRIMARY}; }}
+            QFrame:hover {{ border-color: rgba(244, 37, 140, 0.3); }}
         """)
         
         layout = QHBoxLayout(card)
-        layout.setContentsMargins(16, 0, 16, 0)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 0, 20, 0)
+        layout.setSpacing(16)
 
-        icon = QLabel("文")
-        icon.setFixedSize(32, 32)
+        icon = QLabel("🌐")
+        icon.setFixedSize(40, 40)
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setStyleSheet(f"background-color: {BG_DARK}; border-radius: 8px; font-size: 14px;")
+        icon.setStyleSheet(f"background-color: {BG_DARK}; border-radius: 8px; font-size: 18px;")
         layout.addWidget(icon)
 
         text_layout = QVBoxLayout()
-        text_layout.setSpacing(0)
+        text_layout.setSpacing(2)
         text_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         lbl = QLabel("Output Language")
-        lbl.setFont(QFont("Inter", 9))
-        lbl.setStyleSheet("color: #64748b;")
+        lbl.setFont(QFont("Space Grotesk", 10))
+        lbl.setStyleSheet(f"color: {TEXT_MUTED};")
         text_layout.addWidget(lbl)
 
         self.language_combo = QComboBox()
-        self.language_combo.addItems(["English (US)", "Spanish", "French", "German"])
+        self.language_combo.addItems(["English (US)", "Spanish", "French", "German", "Japanese"])
         self.language_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.language_combo.setFont(QFont("Space Grotesk", 13, QFont.Weight.Medium))
+        self.language_combo.setStyleSheet("color: white;")
         text_layout.addWidget(self.language_combo)
 
         layout.addLayout(text_layout)
@@ -561,52 +540,29 @@ class MainWindow(QMainWindow):
         """Handle successful preview."""
         pixmap = QPixmap.fromImage(image)
         self.preview_widget.set_preview(pixmap, title)
-
-    # ── Language Card ──────────────────────────────────────────────────────
-    def _build_language_card(self) -> QFrame:
-        card = QFrame()
-        card.setFixedHeight(70)
-        card.setStyleSheet(f"""
-            QFrame {{
-                background-color: {SURFACE_INPUT};
-                border: 1px solid {BORDER_DARK};
-                border-radius: 12px;
-            }}
-            QFrame:hover {{ border-color: {PRIMARY}; }}
-        """)
         
-        layout = QHBoxLayout(card)
-        layout.setContentsMargins(16, 0, 16, 0)
-        layout.setSpacing(12)
+    def _on_preview_error(self, error: str):
+        """Handle preview error."""
+        self.preview_widget.set_error(error)
+        print(f"Preview Error: {error}")
+        
+    def _reset_input_mode(self):
+        """Go back to input mode."""
+        self.preview_widget.hide()
+        self.results_view.hide()
+        self.options_container.hide()
+        self.input_view.show()
+        self.url_input.clear()
+        
+        self.current_source = None
+        self.current_is_local = False
+        
+        if hasattr(self, 'worker') and self.worker:
+            self.worker.terminate()
+            self.worker.wait()
 
-        icon = QLabel("文")
-        icon.setFixedSize(32, 32)
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setStyleSheet(f"background-color: {BG_DARK}; border-radius: 8px; font-size: 14px;")
-        layout.addWidget(icon)
 
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(0)
-        text_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-
-        lbl = QLabel("Output Language")
-        lbl.setFont(QFont("Inter", 9))
-        lbl.setStyleSheet("color: #64748b;")
-        text_layout.addWidget(lbl)
-
-        self.language_combo = QComboBox()
-        self.language_combo.addItems(["English (US)", "Spanish", "French", "German"])
-        self.language_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        text_layout.addWidget(self.language_combo)
-
-        layout.addLayout(text_layout)
-        layout.addStretch()
-
-        return card
-
-    # ══════════════════════════════════════════════════════════════════════
-    #  SLOTS
-    # ══════════════════════════════════════════════════════════════════════
+class _OrDivider(QWidget):
     def _on_generate(self):
         """Handle Generate Shorts button click."""
         if not self.current_source:

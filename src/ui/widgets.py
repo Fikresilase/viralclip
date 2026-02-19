@@ -22,36 +22,30 @@ from src.ui.theme import (
 )
 
 # ── Icon Badge ─────────────────────────────────────────────────────────────────
-class IconBadge(QWidget):
-    """Small rounded square icon sticker."""
+class IconBadge(QLabel):
+    """Small rounded square icon sticker matching web design."""
     def __init__(self, icon: str, bg_color: str, fg_color: str, size: int = 32):
-        super().__init__()
+        super().__init__(icon)
         self.setFixedSize(size, size)
-        self.icon = icon
-        self.bg_color = bg_color
-        self.fg_color = fg_color
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setBrush(QBrush(QColor(self.bg_color)))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawRoundedRect(self.rect(), 8, 8)
-        p.setPen(QColor(self.fg_color))
-        p.setFont(QFont("Segoe UI Emoji", 12))
-        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.icon)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setFont(QFont("Segoe UI Emoji", 14))
+        self.setStyleSheet(f"""
+            background-color: {bg_color};
+            color: {fg_color};
+            border-radius: 8px;
+        """)
 
 # ── Glow Button ────────────────────────────────────────────────────────────────
 class GlowButton(QPushButton):
-    """Primary action button with pink glow."""
+    """Primary action button with pink glow matching web design."""
     def __init__(self, text: str):
-        super().__init__(text)
+        super().__init__(f"{text}   ✨")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(56)
+        self.setFixedHeight(64)
         
         self.shadow = QGraphicsDropShadowEffect(self)
-        self.shadow.setBlurRadius(30)
-        self.shadow.setColor(QColor(244, 37, 140, 60))
+        self.shadow.setBlurRadius(40)
+        self.shadow.setColor(QColor(244, 37, 140, 80))
         self.shadow.setOffset(0, 0)
         self.setGraphicsEffect(self.shadow)
         
@@ -63,9 +57,12 @@ class GlowButton(QPushButton):
                 background-color: {bg};
                 color: white;
                 border-radius: 12px;
-                font-weight: 800;
-                font-size: 15px;
+                font-weight: 700;
+                font-size: 18px;
                 letter-spacing: 0.5px;
+            }}
+            QPushButton:hover {{
+                background-color: {PRIMARY_HOVER};
             }}
             QPushButton:disabled {{
                 background-color: #3f3f46;
@@ -74,52 +71,63 @@ class GlowButton(QPushButton):
         """)
 
     def enterEvent(self, event):
-        self._apply_style(PRIMARY_HOVER)
-        self.shadow.setBlurRadius(40)
+        self.shadow.setBlurRadius(50)
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        self._apply_style(PRIMARY)
-        self.shadow.setBlurRadius(30)
+        self.shadow.setBlurRadius(40)
         super().leaveEvent(event)
 
 # ── Upgrade Button ─────────────────────────────────────────────────────────────
 class UpgradeButton(QPushButton):
-    """Pink gradient 'Upgrade to pro' button."""
+    """Pink gradient 'Upgrade to pro' button matching web design."""
     def __init__(self):
         super().__init__("⚡ Upgrade to pro")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(34)
-        self.setFixedWidth(130)
+        self.setFixedHeight(36)
+        self.setMinimumWidth(150)
+        
+        # Add glow effect
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(25)
+        shadow.setColor(QColor(244, 37, 140, 100))
+        shadow.setOffset(0, 0)
+        self.setGraphicsEffect(shadow)
+        
         self.setStyleSheet(f"""
             QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #f4258c, stop:1 #ff4b91);
+                background-color: {PRIMARY};
                 color: white;
                 border-radius: 8px;
                 font-weight: 700;
-                font-size: 11px;
+                font-size: 12px;
+                padding: 0 16px;
+            }}
+            QPushButton:hover {{
+                background-color: {PRIMARY_HOVER};
             }}
         """)
 
 # ── API Key Button ─────────────────────────────────────────────────────────────
 class ApiKeyButton(QPushButton):
-    """Dark 'API Key' button."""
+    """Dark 'API Key' button matching web design."""
     def __init__(self):
         super().__init__("🔑 API Key")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(34)
-        self.setFixedWidth(100)
+        self.setFixedHeight(36)
+        self.setMinimumWidth(110)
         self.setStyleSheet(f"""
             QPushButton {{
-                background-color: {SURFACE_INPUT};
+                background-color: {SURFACE_DARK};
                 color: {TEXT_WHITE};
                 border: 1px solid {BORDER_DARK};
                 border-radius: 8px;
-                font-size: 11px;
-                font-weight: 600;
+                font-size: 12px;
+                font-weight: 700;
+                padding: 0 16px;
             }}
             QPushButton:hover {{
-                border-color: {PRIMARY};
+                background-color: {SURFACE_INPUT};
             }}
         """)
         self.clicked.connect(self._open_dialog)
@@ -168,62 +176,88 @@ class ToggleSwitch(QWidget):
 
 # ── Drop Zone ──────────────────────────────────────────────────────────────────
 class DropZone(QWidget):
-    """Dashed upload container."""
+    """Dashed upload container matching web design."""
     fileDropped = pyqtSignal(str)
     def __init__(self):
         super().__init__()
         self.setAcceptDrops(True)
-        self.setFixedHeight(80)
+        self.setFixedHeight(88)
         self._hover = False
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 0, 16, 0)
-        layout.setSpacing(12)
+        layout.setSpacing(16)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         # Icon
         self.icon_lbl = QLabel("☁️")
-        self.icon_lbl.setFixedSize(36, 36)
+        self.icon_lbl.setFixedSize(40, 40)
         self.icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.icon_lbl.setStyleSheet(f"background: {BLUE_ACCENT_BG}; color: {BLUE_ACCENT}; border-radius: 18px;")
+        self.icon_lbl.setStyleSheet(f"""
+            background-color: {SURFACE_INPUT};
+            color: {BLUE_ACCENT};
+            border: 1px solid {BORDER_DARK};
+            border-radius: 20px;
+            font-size: 18px;
+        """)
         layout.addWidget(self.icon_lbl)
         
         # Labels
         txt_layout = QVBoxLayout()
-        txt_layout.setSpacing(1)
+        txt_layout.setSpacing(2)
         txt_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         
         self.t_lbl = QLabel("Drop files or browse")
-        self.t_lbl.setFont(QFont("Inter", 11, QFont.Weight.Bold))
+        self.t_lbl.setFont(QFont("Space Grotesk", 12, QFont.Weight.Medium))
         txt_layout.addWidget(self.t_lbl)
         
         self.s_lbl = QLabel("MP4, MOV up to 2GB")
-        self.s_lbl.setFont(QFont("Inter", 9))
-        self.s_lbl.setStyleSheet("color: #64748b;")
+        self.s_lbl.setFont(QFont("Space Grotesk", 10))
+        self.s_lbl.setStyleSheet(f"color: {TEXT_MUTED};")
         txt_layout.addWidget(self.s_lbl)
         
         layout.addLayout(txt_layout)
-        layout.addStretch()
 
     def dragEnterEvent(self, e):
-        if e.mimeData().hasUrls(): e.acceptProposedAction(); self._hover = True; self.update()
-    def dragLeaveEvent(self, e): self._hover = False; self.update()
+        if e.mimeData().hasUrls(): 
+            e.acceptProposedAction()
+            self._hover = True
+            self.update()
+            
+    def dragLeaveEvent(self, e): 
+        self._hover = False
+        self.update()
+        
     def dropEvent(self, e):
-        self._hover = False; self.update()
+        self._hover = False
+        self.update()
         urls = e.mimeData().urls()
-        if urls: self.fileDropped.emit(urls[0].toLocalFile())
+        if urls: 
+            self.fileDropped.emit(urls[0].toLocalFile())
 
     def mousePressEvent(self, e):
         from PyQt6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getOpenFileName(self, "Select Video", "", "Video (*.mp4 *.mov)")
-        if path: self.fileDropped.emit(path)
+        if path: 
+            self.fileDropped.emit(path)
 
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(BLUE_ACCENT if self._hover else "#3f3f46"))
+        
+        # Background
+        p.setBrush(QBrush(QColor(SURFACE_INPUT) if not self._hover else QColor("#3b2330")))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawRoundedRect(self.rect(), 12, 12)
+        
+        # Dashed border
+        pen = QPen(QColor(BLUE_ACCENT if self._hover else BORDER_DARK))
         pen.setStyle(Qt.PenStyle.DashLine)
+        pen.setWidth(2)
         p.setPen(pen)
-        p.drawRoundedRect(self.rect().adjusted(1,1,-1,-1), 12, 12)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 12, 12)
 
 # ── Preview Widget ─────────────────────────────────────────────────────────────
 class PreviewWidget(QWidget):

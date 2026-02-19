@@ -7,9 +7,11 @@ import subprocess
 import shutil
 from datetime import timedelta
 import concurrent.futures
+import base64
 
 import cv2
 from google import genai
+from google.genai import types
 from PyQt6.QtCore import QThread, pyqtSignal
 import yt_dlp
 
@@ -64,8 +66,11 @@ class GeneratorWorker(QThread):
             if not self.api_key:
                 raise Exception("Gemini API Key is missing.")
 
-            self.log("Configuring Gemini AI...")
-            self.client = genai.Client(api_key=self.api_key)
+            self.log(f"Configuring Gemini AI...")
+            self.client = genai.Client(
+                api_key=self.api_key,
+                http_options={'api_version': 'v1alpha'}
+            )
             self.log("Gemini AI configured successfully.")
 
             # 1. Get Context (Text or Audio)
@@ -265,18 +270,28 @@ class GeneratorWorker(QThread):
                     )
                     response_text = response.text
                 else:
-                    self.log(f"Uploading audio chunk {i+1} ({os.path.getsize(chunk_data['path'])/1024/1024:.2f} MB)...")
-                    uploaded_file = self.client.files.upload(file_path=chunk_data['path'])
+                    # Audio analysis with inline data
+                    self.log(f"Reading audio chunk {i+1} ({os.path.getsize(chunk_data['path'])/1024/1024:.2f} MB)...")
                     
-                    self.log("Waiting for file processing...")
-                    while uploaded_file.state == 'PROCESSING':
-                        time.sleep(2)
-                        uploaded_file = self.client.files.get(name=uploaded_file.name)
+                    # Read audio file as bytes
+                    with open(chunk_data['path'], 'rb') as f:
+                        audio_bytes = f.read()
+                    
+                    # Create content with inline audio data
+                    content_parts = [
+                        types.Part(text=VIRAL_MOMENTS_PROMPT),
+                        types.Part(
+                            inline_data=types.Blob(
+                                mime_type="audio/mpeg",
+                                data=audio_bytes,
+                            )
+                        )
+                    ]
                     
                     self.log("Sending to Gemini...")
                     response = self.client.models.generate_content(
                         model='gemini-3-flash-preview',
-                        contents=[VIRAL_MOMENTS_PROMPT, uploaded_file]
+                        contents=[types.Content(parts=content_parts)]
                     )
                     response_text = response.text
                     
@@ -354,29 +369,39 @@ class GeneratorWorker(QThread):
             else:
                 self.log(f"Failed to extract frame at {t}s")
 
-        self.log(f"Extracted {len(frames)} frames. Uploading to Gemini...")
+        self.log(f"Extracted {len(frames)} frames. Preparing for Gemini...")
         
-        prompt_parts = [VISUAL_MOMENTS_PROMPT]
-        uploaded_files = []
+        # Build content parts with inline image data
+        content_parts = [types.Part(text=VISUAL_MOMENTS_PROMPT)]
         
         try:
             for i, frame in enumerate(frames):
-                self.log(f"Uploading frame {i+1}...")
-                uploaded_file = self.client.files.upload(file_path=frame['path'])
+                self.log(f"Reading frame {i+1}...")
                 
-                # Wait for processing
-                while uploaded_file.state == 'PROCESSING':
-                    time.sleep(1)
-                    uploaded_file = self.client.files.get(name=uploaded_file.name)
+                # Read image file as bytes
+                with open(frame['path'], 'rb') as f:
+                    image_bytes = f.read()
                 
-                uploaded_files.append(uploaded_file)
-                prompt_parts.append(f"Frame {i+1} (taken at {timedelta(seconds=frame['time'])})")
-                prompt_parts.append(uploaded_file)
+                # Add frame description
+                content_parts.append(
+                    types.Part(text=f"Frame {i+1} (taken at {timedelta(seconds=frame['time'])})")
+                )
+                
+                # Add image as inline data
+                content_parts.append(
+                    types.Part(
+                        inline_data=types.Blob(
+                            mime_type="image/jpeg",
+                            data=image_bytes,
+                        ),
+                        media_resolution={"level": "media_resolution_high"}
+                    )
+                )
             
             self.log("Sending prompt to Gemini...")
             response = self.client.models.generate_content(
                 model='gemini-3-flash-preview',
-                contents=prompt_parts
+                contents=[types.Content(parts=content_parts)]
             )
             response_text = response.text
             self.log("Gemini response received.")
@@ -417,13 +442,6 @@ class GeneratorWorker(QThread):
                     final_moments.append(item)
                 except Exception as e:
                     self.log(f"Error parsing timestamp {item}: {e}")
-            
-            # Cleanup remote files
-            for uploaded_file in uploaded_files:
-                try:
-                    self.client.files.delete(name=uploaded_file.name)
-                except:
-                    pass
 
             return self._deduplicate(final_moments)
             
