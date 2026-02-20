@@ -14,7 +14,7 @@ from src.ui.flow_layout import FlowLayout
 
 from PyQt6.QtWidgets import QGraphicsDropShadowEffect
 
-def add_shadow(widget, radius=20, y_offset=8, alpha=40):
+def add_shadow(widget, radius=20, y_offset=8, alpha=60):
     shadow = QGraphicsDropShadowEffect(widget)
     shadow.setBlurRadius(radius)
     shadow.setXOffset(0)
@@ -46,11 +46,15 @@ class ToggleButton(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        # Background track
+        # Background track with gradient
         if self._checked:
-            painter.setBrush(QBrush(QColor("#2563EB")))
+            from PyQt6.QtGui import QLinearGradient
+            gradient = QLinearGradient(0, 0, 44, 24)
+            gradient.setColorAt(0, QColor("#3B82F6"))
+            gradient.setColorAt(1, QColor("#2563EB"))
+            painter.setBrush(QBrush(gradient))
         else:
-            painter.setBrush(QBrush(QColor("#4A4A4A")))
+            painter.setBrush(QBrush(QColor("#3A3A3A")))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(0, 0, 44, 24, 12, 12)
         
@@ -64,43 +68,51 @@ QWidget {
     font-family: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
     font-size: 14px;
     color: #E0E0E0;
-    background-color: #121212;
+    background-color: #0F0F0F;
 }
 
 QMainWindow, QDialog {
-    background-color: #121212;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+        stop:0 #0F0F0F, 
+        stop:1 #1A1A1A);
 }
 
 QFrame#headerPanel {
-    background-color: #1E1E1E;
-    border-bottom: 1px solid #333333;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+        stop:0 #1E1E1E, 
+        stop:1 #181818);
+    border-bottom: 1px solid #2A2A2A;
 }
 
 QFrame#inputCard, QFrame#resultsSection, QFrame#settingsPanel {
-    background-color: #1E1E1E;
-    border: 1px solid #333333;
-    border-radius: 8px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+        stop:0 #1E1E1E, 
+        stop:1 #181818);
+    border: 1px solid #2A2A2A;
+    border-radius: 12px;
 }
 
 QFrame#innerGroup, QFrame#resultItem {
-    background-color: #181818;
-    border: 1px solid #333333;
-    border-radius: 8px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+        stop:0 #222222, 
+        stop:1 #1A1A1A);
+    border: 1px solid #2A2A2A;
+    border-radius: 10px;
 }
 
 QLineEdit, QComboBox {
-    background-color: #2D2D2D;
-    border: 1px solid #333333;
-    border-radius: 4px;
-    padding: 8px 12px;
-    color: #E0E0E0;
+    background-color: #1A1A1A;
+    border: 1.5px solid #2A2A2A;
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: #F0F0F0;
     font-size: 13px;
     selection-background-color: #2563EB;
 }
 
 QLineEdit:focus, QComboBox:focus {
-    border: 1px solid #2563EB;
-    background-color: #252525;
+    border: 1.5px solid #3B82F6;
+    background-color: #1F1F1F;
 }
 
 QComboBox::drop-down {
@@ -118,110 +130,135 @@ QComboBox::down-arrow {
 
 QComboBox QAbstractItemView {
     background-color: #1E1E1E;
-    border: 1px solid #333333;
-    border-radius: 4px;
+    border: 1px solid #2A2A2A;
+    border-radius: 8px;
     selection-background-color: #2D2D2D;
     outline: none;
 }
 
 QPushButton {
-    background-color: #2D2D2D;
-    border: 1px solid #333333;
-    border-radius: 4px;
-    padding: 6px 12px;
-    color: #E0E0E0;
-    font-weight: 500;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+        stop:0 #2D2D2D, 
+        stop:1 #252525);
+    border: 1px solid #3A3A3A;
+    border-radius: 8px;
+    padding: 8px 16px;
+    color: #F0F0F0;
+    font-weight: 600;
     font-size: 13px;
 }
 QPushButton:hover {
-    background-color: #3A3A3A;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+        stop:0 #3A3A3A, 
+        stop:1 #2D2D2D);
+    border: 1px solid #4A4A4A;
 }
 QPushButton:pressed {
-    background-color: #2D2D2D;
+    background: #252525;
+    border: 1px solid #2A2A2A;
 }
 
 QPushButton#primaryBtn {
-    background-color: #2563EB;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+        stop:0 #3B82F6, 
+        stop:1 #2563EB);
     color: white;
     border: none;
-    font-weight: bold;
-    padding: 8px 16px;
-    border-radius: 4px;
+    font-weight: 700;
+    padding: 10px 20px;
+    border-radius: 8px;
 }
 QPushButton#primaryBtn:hover {
-    background-color: #1D4ED8;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+        stop:0 #60A5FA, 
+        stop:1 #3B82F6);
 }
 QPushButton#primaryBtn:pressed {
-    background-color: #1E40AF;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+        stop:0 #2563EB, 
+        stop:1 #1D4ED8);
 }
 
 QPushButton#linkBtn {
-    background-color: #2D2D2D;
-    border: 1px solid #333333;
+    background-color: transparent;
+    border: 1px solid #3A3A3A;
     color: #9CA3AF;
     font-size: 12px;
-    padding: 4px 8px;
-    border-radius: 4px;
+    padding: 6px 12px;
+    border-radius: 6px;
 }
 QPushButton#linkBtn:hover {
-    color: #E0E0E0;
-    background-color: #3A3A3A;
+    color: #F0F0F0;
+    background-color: #2A2A2A;
+    border: 1px solid #4A4A4A;
 }
 
 QPushButton#browseBtn {
-    background-color: #2D2D2D;
-    border: 1px solid #333333;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+        stop:0 #2D2D2D, 
+        stop:1 #252525);
+    border: 2px dashed #3A3A3A;
     color: #E0E0E0;
     height: 60px;
-    font-weight: 500;
+    font-weight: 600;
     font-size: 13px;
-    border-radius: 4px;
+    border-radius: 10px;
 }
 QPushButton#browseBtn:hover {
-    background-color: #3A3A3A;
-    border: 1px solid #4A4A4A;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+        stop:0 #3A3A3A, 
+        stop:1 #2D2D2D);
+    border: 2px dashed #4A4A4A;
     color: #FFFFFF;
 }
 
 QCheckBox {
     spacing: 12px;
-    padding: 8px 12px;
-    background-color: #2D2D2D;
-    border: 1px solid #333333;
-    border-radius: 4px;
-    color: #E0E0E0;
+    padding: 10px 14px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+        stop:0 #2D2D2D, 
+        stop:1 #252525);
+    border: 1px solid #3A3A3A;
+    border-radius: 8px;
+    color: #F0F0F0;
     font-size: 13px;
     font-weight: 600;
 }
 QCheckBox:hover {
-    background-color: #3A3A3A;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+        stop:0 #3A3A3A, 
+        stop:1 #2D2D2D);
 }
 QCheckBox::indicator {
-    width: 16px;
-    height: 16px;
-    background-color: #121212;
-    border: 1px solid #333333;
-    border-radius: 2px;
+    width: 18px;
+    height: 18px;
+    background-color: #1A1A1A;
+    border: 2px solid #3A3A3A;
+    border-radius: 4px;
 }
 QCheckBox::indicator:hover {
-    border: 1px solid #2563EB;
+    border: 2px solid #3B82F6;
 }
 QCheckBox::indicator:checked {
-    background-color: #2563EB;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+        stop:0 #3B82F6, 
+        stop:1 #2563EB);
     border-color: #2563EB;
 }
 
 QProgressBar {
-    background-color: #2D2D2D;
-    border: 1px solid #333333;
-    border-radius: 2px;
-    height: 16px;
+    background-color: #1A1A1A;
+    border: 1px solid #2A2A2A;
+    border-radius: 8px;
+    height: 20px;
     text-align: right;
     color: transparent;
 }
 QProgressBar::chunk {
-    background-color: #2563EB;
-    border-radius: 2px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+        stop:0 #3B82F6, 
+        stop:1 #8B5CF6);
+    border-radius: 8px;
 }
 
 QScrollArea {
@@ -231,51 +268,54 @@ QScrollArea {
 
 QScrollBar:vertical {
     border: none;
-    background: #121212;
-    width: 8px;
+    background: transparent;
+    width: 10px;
     margin: 0px;
 }
 QScrollBar::handle:vertical {
-    background: #333333;
+    background: #2A2A2A;
     min-height: 30px;
-    border-radius: 4px;
+    border-radius: 5px;
 }
 QScrollBar::handle:vertical:hover {
-    background: #4a4a4a;
+    background: #3A3A3A;
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0px;
 }
 
 QLabel#pageHeadingTitle {
-    font-size: 30px;
-    font-weight: 700;
+    font-size: 36px;
+    font-weight: 800;
     color: white;
     background-color: transparent;
+    letter-spacing: -1px;
 }
 QLabel#pageHeadingSub {
     color: #9CA3AF;
-    font-size: 14px;
+    font-size: 15px;
     background-color: transparent;
-    margin-top: 4px;
+    margin-top: 6px;
 }
 QLabel#cardTitle {
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 700;
     color: white;
     background-color: transparent;
+    letter-spacing: -0.3px;
 }
 QLabel#labelText {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
-    color: white;
+    color: #F0F0F0;
     background-color: transparent;
-    margin-bottom: 2px;
+    margin-bottom: 4px;
 }
 QLabel#mutedText {
     font-size: 12px;
     color: #9CA3AF;
     background-color: transparent;
+    line-height: 1.4;
 }
 QLabel#resultTitle {
     font-size: 14px;
@@ -286,8 +326,8 @@ QLabel#resultTitle {
 
 QFrame#thumbnailFrame {
     background-color: #000000;
-    border: 1px solid #333333;
-    border-radius: 4px;
+    border: 1px solid #2A2A2A;
+    border-radius: 8px;
 }
 """
 
@@ -539,7 +579,7 @@ class MainWindow(QMainWindow):
         hw_layout.setContentsMargins(0,0,0,0)
         hw_layout.setSpacing(8)
         
-        h1 = QLabel("Automated Video Shorts")
+        h1 = QLabel("Get Viral Shorts Instantly")
         h1.setObjectName("pageHeadingTitle")
         h1.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
@@ -610,7 +650,7 @@ class MainWindow(QMainWindow):
         self.url_input.setPlaceholderText("https://youtube.com/...")
         self.url_input.textChanged.connect(self.on_url_changed)
         
-        u_sub = QLabel("Paste a link to any public video.")
+        u_sub = QLabel("Paste a link to a youtube video.")
         u_sub.setObjectName("mutedText")
         
         u_layout.addWidget(u_lbl)
