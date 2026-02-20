@@ -25,7 +25,7 @@ def main():
 
     # Apply global font
     from PyQt6.QtGui import QFont
-    font = QFont("Segoe UI", 10)
+    font = QFont("Inter", 10)
     app.setFont(font)
 
     window = MainWindow()

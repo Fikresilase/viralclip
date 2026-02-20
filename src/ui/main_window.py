@@ -10,11 +10,22 @@ from PyQt6.QtGui import QPixmap, QImage, QColor, QFont, QIcon, QPainter, QBrush,
 
 from src.workers.preview_worker import PreviewWorker
 from src.workers.generator_worker import GeneratorWorker
+from src.ui.flow_layout import FlowLayout
+
+from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+
+def add_shadow(widget, radius=20, y_offset=8, alpha=40):
+    shadow = QGraphicsDropShadowEffect(widget)
+    shadow.setBlurRadius(radius)
+    shadow.setXOffset(0)
+    shadow.setYOffset(y_offset)
+    shadow.setColor(QColor(0, 0, 0, alpha))
+    widget.setGraphicsEffect(shadow)
 
 STYLE_SHEET = """
 QWidget {
-    font-family: 'Inter', 'Segoe UI', sans-serif;
-    font-size: 13px;
+    font-family: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 14px;
     color: #E0E0E0;
     background-color: #121212;
 }
@@ -31,21 +42,23 @@ QFrame#headerPanel {
 QFrame#inputCard, QFrame#resultsSection, QFrame#settingsPanel {
     background-color: #1E1E1E;
     border: 1px solid #333333;
-    border-radius: 6px;
+    border-radius: 8px;
 }
 
 QFrame#innerGroup, QFrame#resultItem {
     background-color: #181818;
     border: 1px solid #333333;
-    border-radius: 6px;
+    border-radius: 8px;
 }
 
-QLineEdit, QComboBox, QPushButton, QProgressBar {
+QLineEdit, QComboBox {
     background-color: #2D2D2D;
     border: 1px solid #333333;
     border-radius: 4px;
-    padding: 6px 10px;
+    padding: 8px 12px;
     color: #E0E0E0;
+    font-size: 13px;
+    selection-background-color: #2563EB;
 }
 
 QLineEdit:focus, QComboBox:focus {
@@ -53,8 +66,41 @@ QLineEdit:focus, QComboBox:focus {
     background-color: #252525;
 }
 
+QComboBox::drop-down {
+    border: none;
+    width: 30px;
+}
+
+QComboBox::down-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #9CA3AF;
+    margin-right: 12px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #1E1E1E;
+    border: 1px solid #333333;
+    border-radius: 4px;
+    selection-background-color: #2D2D2D;
+    outline: none;
+}
+
+QPushButton {
+    background-color: #2D2D2D;
+    border: 1px solid #333333;
+    border-radius: 4px;
+    padding: 6px 12px;
+    color: #E0E0E0;
+    font-weight: 500;
+    font-size: 13px;
+}
 QPushButton:hover {
     background-color: #3A3A3A;
+}
+QPushButton:pressed {
+    background-color: #2D2D2D;
 }
 
 QPushButton#primaryBtn {
@@ -62,9 +108,14 @@ QPushButton#primaryBtn {
     color: white;
     border: none;
     font-weight: bold;
+    padding: 8px 16px;
+    border-radius: 4px;
 }
 QPushButton#primaryBtn:hover {
     background-color: #1D4ED8;
+}
+QPushButton#primaryBtn:pressed {
+    background-color: #1E40AF;
 }
 
 QPushButton#linkBtn {
@@ -73,15 +124,26 @@ QPushButton#linkBtn {
     color: #9CA3AF;
     font-size: 12px;
     padding: 4px 8px;
+    border-radius: 4px;
 }
 QPushButton#linkBtn:hover {
-    color: white;
+    color: #E0E0E0;
     background-color: #3A3A3A;
 }
 
 QPushButton#browseBtn {
-    height: 48px;
-    font-weight: bold;
+    background-color: #2D2D2D;
+    border: 1px solid #333333;
+    color: #E0E0E0;
+    height: 60px;
+    font-weight: 500;
+    font-size: 13px;
+    border-radius: 4px;
+}
+QPushButton#browseBtn:hover {
+    background-color: #3A3A3A;
+    border: 1px solid #4A4A4A;
+    color: #FFFFFF;
 }
 
 QCheckBox {
@@ -90,6 +152,9 @@ QCheckBox {
     background-color: #2D2D2D;
     border: 1px solid #333333;
     border-radius: 4px;
+    color: #E0E0E0;
+    font-size: 13px;
+    font-weight: 600;
 }
 QCheckBox:hover {
     background-color: #3A3A3A;
@@ -99,7 +164,10 @@ QCheckBox::indicator {
     height: 16px;
     background-color: #121212;
     border: 1px solid #333333;
-    border-radius: 3px;
+    border-radius: 2px;
+}
+QCheckBox::indicator:hover {
+    border: 1px solid #2563EB;
 }
 QCheckBox::indicator:checked {
     background-color: #2563EB;
@@ -111,7 +179,8 @@ QProgressBar {
     border: 1px solid #333333;
     border-radius: 2px;
     height: 16px;
-    text-align: center;
+    text-align: right;
+    color: transparent;
 }
 QProgressBar::chunk {
     background-color: #2563EB;
@@ -127,11 +196,11 @@ QScrollBar:vertical {
     border: none;
     background: #121212;
     width: 8px;
-    margin: 0px 0px 0px 0px;
+    margin: 0px;
 }
 QScrollBar::handle:vertical {
     background: #333333;
-    min-height: 20px;
+    min-height: 30px;
     border-radius: 4px;
 }
 QScrollBar::handle:vertical:hover {
@@ -143,26 +212,28 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
 
 QLabel#pageHeadingTitle {
     font-size: 30px;
-    font-weight: bold;
-    color: #ffffff;
+    font-weight: 700;
+    color: white;
     background-color: transparent;
 }
 QLabel#pageHeadingSub {
     color: #9CA3AF;
     font-size: 14px;
     background-color: transparent;
+    margin-top: 4px;
 }
 QLabel#cardTitle {
     font-size: 15px;
-    font-weight: bold;
-    color: #ffffff;
+    font-weight: 700;
+    color: white;
     background-color: transparent;
 }
 QLabel#labelText {
     font-size: 13px;
-    font-weight: bold;
-    color: #ffffff;
+    font-weight: 600;
+    color: white;
     background-color: transparent;
+    margin-bottom: 2px;
 }
 QLabel#mutedText {
     font-size: 12px;
@@ -171,15 +242,15 @@ QLabel#mutedText {
 }
 QLabel#resultTitle {
     font-size: 14px;
-    font-weight: bold;
-    color: #ffffff;
+    font-weight: 700;
+    color: white;
     background-color: transparent;
 }
 
 QFrame#thumbnailFrame {
-    background-color: black;
+    background-color: #000000;
     border: 1px solid #333333;
-    border-radius: 6px;
+    border-radius: 4px;
 }
 """
 
@@ -288,6 +359,7 @@ class ResultItem(QFrame):
     def __init__(self, data, parent=None):
         super().__init__(parent)
         self.setObjectName("resultItem")
+        add_shadow(self, radius=12, y_offset=4, alpha=30)
         self.data = data
         
         layout = QVBoxLayout(self)
@@ -296,8 +368,7 @@ class ResultItem(QFrame):
         # Thumbnail Base
         thumb_frame = QFrame()
         thumb_frame.setObjectName("thumbnailFrame")
-        thumb_frame.setMinimumHeight(180)
-        thumb_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        thumb_frame.setFixedSize(160, 284)
         
         thumb_layout = QVBoxLayout(thumb_frame)
         thumb_layout.setContentsMargins(0, 0, 0, 0)
@@ -307,7 +378,7 @@ class ResultItem(QFrame):
         
         # Load image
         if os.path.exists(data.get('thumb', '')):
-            pixmap = QPixmap(data['thumb']).scaledToHeight(180, Qt.TransformationMode.SmoothTransformation)
+            pixmap = QPixmap(data['thumb']).scaled(160, 284, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
             img_label.setPixmap(pixmap)
             
         thumb_layout.addWidget(img_label)
@@ -315,10 +386,12 @@ class ResultItem(QFrame):
         # Overlay title
         title_lbl = QLabel(data.get('title', 'Generated Clip'))
         title_lbl.setObjectName("resultTitle")
-        title_lbl.setStyleSheet("background-color: rgba(0,0,0,150); padding: 4px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px;")
+        title_lbl.setStyleSheet("background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0,0,0,0), stop:1 rgba(0,0,0,200)); padding: 8px; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px;")
+        title_lbl.setFixedHeight(40)
         
-        # Setup absolute-like position or just add to layout
-        thumb_layout.addWidget(title_lbl, alignment=Qt.AlignmentFlag.AlignBottom)
+        # Absolute positioning for overlay
+        title_lbl.setParent(thumb_frame)
+        title_lbl.setGeometry(0, 244, 160, 40)
         
         # Buttons
         play_btn = QPushButton("Play Video")
@@ -357,14 +430,14 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Content Factory")
-        self.resize(900, 750)
+        self.resize(1024, 768)
         
         # Set central widget to use app background
         self.setStyleSheet(STYLE_SHEET)
         
         self.settings = QSettings()
         
-        self.source = None
+        self.source = ""
         self.is_local = False
         
         self._init_ui()
@@ -379,20 +452,21 @@ class MainWindow(QMainWindow):
         # Header (ToolBar equivalent)
         header = QFrame()
         header.setObjectName("headerPanel")
-        header.setFixedHeight(60)
+        header.setFixedHeight(64)
         h_layout = QHBoxLayout(header)
-        h_layout.setContentsMargins(20, 0, 20, 0)
+        h_layout.setContentsMargins(24, 0, 24, 0)
         
         title_box = QHBoxLayout()
         icon_lbl = QLabel("🤖")
-        icon_lbl.setStyleSheet("font-size: 20px; background-color: transparent;")
+        icon_lbl.setStyleSheet("font-size: 24px; background-color: transparent;")
         app_title = QLabel("Content Factory")
-        app_title.setStyleSheet("font-weight: bold; font-size: 15px; color: white; background-color: transparent;")
+        app_title.setStyleSheet("font-weight: 800; font-size: 16px; color: #FAFAFA; background-color: transparent; letter-spacing: -0.5px;")
         title_box.addWidget(icon_lbl)
         title_box.addWidget(app_title)
         title_box.addStretch()
         
         action_box = QHBoxLayout()
+        action_box.setSpacing(12)
         api_btn = QPushButton("🔑 API Key")
         upgrade_btn = QPushButton("⚡ Upgrade to pro")
         upgrade_btn.setObjectName("primaryBtn")
@@ -451,6 +525,7 @@ class MainWindow(QMainWindow):
         # --- Page 0: Input Card ---
         self.input_card = QFrame()
         self.input_card.setObjectName("inputCard")
+        add_shadow(self.input_card)
         ic_layout = QVBoxLayout(self.input_card)
         ic_layout.setContentsMargins(24, 24, 24, 24)
         ic_layout.setSpacing(16)
@@ -461,7 +536,6 @@ class MainWindow(QMainWindow):
         lbl_1.setObjectName("cardTitle")
         
         self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setObjectName("linkBtn")
         self.cancel_btn.setVisible(False)
         self.cancel_btn.clicked.connect(self.reset_input)
         
@@ -484,14 +558,19 @@ class MainWindow(QMainWindow):
         in_grid = QGridLayout(inputs_widget)
         in_grid.setContentsMargins(0, 0, 0, 0)
         in_grid.setSpacing(24)
+        in_grid.setColumnStretch(0, 1)
+        in_grid.setColumnStretch(1, 1)
         
         # URL Block
         url_box = QFrame()
         url_box.setObjectName("innerGroup")
+        add_shadow(url_box, radius=10, y_offset=4, alpha=20)
         u_layout = QVBoxLayout(url_box)
-        u_layout.setSpacing(8)
+        u_layout.setContentsMargins(20, 20, 20, 20)
+        u_layout.setSpacing(12)
         
-        u_lbl = QLabel("🔗 URL Source")
+        u_lbl = QLabel("<span style='color: #2563EB;'>🔗</span> URL Source")
+        u_lbl.setTextFormat(Qt.TextFormat.RichText)
         u_lbl.setObjectName("labelText")
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("https://youtube.com/...")
@@ -503,17 +582,21 @@ class MainWindow(QMainWindow):
         u_layout.addWidget(u_lbl)
         u_layout.addWidget(self.url_input)
         u_layout.addWidget(u_sub)
+        u_layout.addStretch()
         
         # File Block
         file_box = QFrame()
         file_box.setObjectName("innerGroup")
+        add_shadow(file_box, radius=10, y_offset=4, alpha=20)
         f_layout = QVBoxLayout(file_box)
-        f_layout.setSpacing(8)
+        f_layout.setContentsMargins(20, 20, 20, 20)
+        f_layout.setSpacing(12)
         
-        f_lbl = QLabel("📂 Local File")
+        f_lbl = QLabel("<span style='color: #2563EB;'>📁</span> Local File")
+        f_lbl.setTextFormat(Qt.TextFormat.RichText)
         f_lbl.setObjectName("labelText")
         
-        browse_btn = QPushButton("Upload Files...")
+        browse_btn = QPushButton("📄 Browse Files...")
         browse_btn.setObjectName("browseBtn")
         browse_btn.clicked.connect(self.browse_files)
         
@@ -542,13 +625,31 @@ class MainWindow(QMainWindow):
         self.preview_image.setMinimumSize(320, 180)
         self.preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
+        # Absolute positioning overlay inside preview_image isn't clean with layouts unless we use a wrapper.
+        # Let's wrap it.
+        preview_wrap = QFrame()
+        preview_wrap.setMinimumSize(320, 180)
+        p_layout = QVBoxLayout(preview_wrap)
+        p_layout.setContentsMargins(0, 0, 0, 0)
+        p_layout.addWidget(self.preview_image)
+        
         self.preview_title = QLabel("Title")
         self.preview_title.setObjectName("resultTitle")
+        self.preview_title.setStyleSheet("background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0,0,0,0), stop:1 rgba(0,0,0,220)); padding: 12px; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px;")
+        
+        self.preview_title.setParent(preview_wrap)
+        # We will adjust geometry dynamically or use layout. Better to use layout alignment.
+        # Let's put it back to normal layout but overlapping.
+        self.preview_title.setVisible(False) # we can set visibility or handle in resizeEvent. We'll stick to a simpler approach: Just add it as a child of preview_image later or use a layout inside it.
+        
+        # Wait, the easiest way is to let preview_title just sit inside the image using a QVBoxLayout on preview_image.
+        img_layout = QVBoxLayout(self.preview_image)
+        img_layout.setContentsMargins(0, 0, 0, 0)
+        img_layout.addWidget(self.preview_title, alignment=Qt.AlignmentFlag.AlignBottom)
         
         # Simulate video thumb layout
         thumb_v.addWidget(thumb_lbl)
         thumb_v.addWidget(self.preview_image)
-        thumb_v.addWidget(self.preview_title)
         
         play_prev = QPushButton("▶ Preview Media")
         thumb_v.addWidget(play_prev)
@@ -557,19 +658,35 @@ class MainWindow(QMainWindow):
         
         # Right: Settings
         settings_box = QFrame()
-        settings_box.setObjectName("innerGroup")
+        # Remove innerGroup styling and shadow to match Image 2 which shows it flat inside the card
+        # Or wait, Image 2 shows settings are just directly on the card!
         s_layout = QVBoxLayout(settings_box)
+        s_layout.setContentsMargins(0, 0, 0, 0)
         s_layout.setSpacing(12)
         
         s_title = QLabel("2. Generation Settings")
-        s_title.setObjectName("labelText")
+        s_title.setObjectName("cardTitle")
         sep2 = QFrame()
         sep2.setFixedHeight(1)
         sep2.setStyleSheet("background-color: #333333;")
         
+        # Smart crop box
+        sc_box = QFrame()
+        sc_box.setStyleSheet("background-color: #2D2D2D; border: 1px solid #333333; border-radius: 4px;")
+        sc_layout = QVBoxLayout(sc_box)
+        sc_layout.setContentsMargins(12, 12, 12, 12)
+        sc_layout.setSpacing(4)
+        
         self.smart_crop_chk = QCheckBox("Enable Smart Crop")
         self.smart_crop_chk.setChecked(True)
-        # Using rich text or layout for subtitle is complex in QCheckbox, so appending
+        self.smart_crop_chk.setStyleSheet("border: none; background-color: transparent;")
+        
+        sc_sub = QLabel("Keep speakers centered")
+        sc_sub.setObjectName("mutedText")
+        sc_sub.setStyleSheet("border: none; background-color: transparent; padding-left: 28px;") # align with text
+        
+        sc_layout.addWidget(self.smart_crop_chk)
+        sc_layout.addWidget(sc_sub)
         
         c_lbl = QLabel("Caption Style")
         c_lbl.setObjectName("labelText")
@@ -580,15 +697,15 @@ class MainWindow(QMainWindow):
             "Gaming (High Contrast)"
         ])
         
-        generate_btn = QPushButton("🎞️ Generate Shorts")
+        generate_btn = QPushButton("🎬 Generate Shorts")
         generate_btn.setObjectName("primaryBtn")
         generate_btn.setFixedHeight(44)
         generate_btn.clicked.connect(self.on_generate)
         
         s_layout.addWidget(s_title)
         s_layout.addWidget(sep2)
-        s_layout.addWidget(self.smart_crop_chk)
-        s_layout.addSpacing(10)
+        s_layout.addWidget(sc_box)
+        s_layout.addSpacing(6)
         s_layout.addWidget(c_lbl)
         s_layout.addWidget(self.style_combo)
         s_layout.addStretch()
@@ -605,15 +722,17 @@ class MainWindow(QMainWindow):
         # --- Page 1: Results Section ---
         self.results_section = QFrame()
         self.results_section.setObjectName("resultsSection")
+        add_shadow(self.results_section)
         res_layout = QVBoxLayout(self.results_section)
         res_layout.setContentsMargins(24, 24, 24, 24)
         res_layout.setSpacing(16)
         
         res_header = QHBoxLayout()
-        res_title = QLabel("🎬 Output Gallery")
+        res_title = QLabel("<span style='color: #2563EB;'>▶</span> Output Gallery")
+        res_title.setTextFormat(Qt.TextFormat.RichText)
         res_title.setObjectName("cardTitle")
         
-        restart_btn = QPushButton("🔄 Start Over")
+        restart_btn = QPushButton("↻ Start Over")
         restart_btn.setObjectName("linkBtn")
         restart_btn.clicked.connect(self.reset_all)
         
@@ -629,8 +748,7 @@ class MainWindow(QMainWindow):
         
         # Grid for Outputs
         self.results_grid_widget = QWidget()
-        self.results_grid = QGridLayout(self.results_grid_widget)
-        self.results_grid.setSpacing(16)
+        self.results_grid = FlowLayout(self.results_grid_widget, hSpacing=16, vSpacing=16)
         
         res_layout.addWidget(self.results_grid_widget)
         
@@ -688,7 +806,7 @@ class MainWindow(QMainWindow):
         self.inner_stack.setCurrentIndex(0)
         self.cancel_btn.setVisible(False)
         self.url_input.clear()
-        self.source = None
+        self.source = ""
         self.is_local = False
         self.preview_image.clear()
         self.preview_title.clear()
@@ -725,21 +843,21 @@ class MainWindow(QMainWindow):
     def populate_results(self, results):
         # Clear existing
         for i in reversed(range(self.results_grid.count())): 
-            w = self.results_grid.itemAt(i).widget()
-            if w:
-                w.setParent(None)
-                w.deleteLater()
+            item = self.results_grid.itemAt(i)
+            if item:
+                w = item.widget()
+                if w:
+                    w.setParent(None)
+                    w.deleteLater()
                 
         if not results:
             lbl = QLabel("No viral moments found.")
-            self.results_grid.addWidget(lbl, 0, 0)
+            self.results_grid.addWidget(lbl)
             return
 
         for i, res in enumerate(results):
-            row = i // 4
-            col = i % 4
             item_widget = ResultItem(res, self)
-            self.results_grid.addWidget(item_widget, row, col)
+            self.results_grid.addWidget(item_widget)
 
     def reset_all(self):
         self.reset_input()
