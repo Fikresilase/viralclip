@@ -22,6 +22,43 @@ def add_shadow(widget, radius=20, y_offset=8, alpha=40):
     shadow.setColor(QColor(0, 0, 0, alpha))
     widget.setGraphicsEffect(shadow)
 
+class ToggleButton(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(44, 24)
+        self._checked = False
+        self._animation_position = 0.0
+        
+    def setChecked(self, checked):
+        self._checked = checked
+        self._animation_position = 1.0 if checked else 0.0
+        self.update()
+        
+    def isChecked(self):
+        return self._checked
+        
+    def mousePressEvent(self, event):
+        self._checked = not self._checked
+        self._animation_position = 1.0 if self._checked else 0.0
+        self.update()
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Background track
+        if self._checked:
+            painter.setBrush(QBrush(QColor("#2563EB")))
+        else:
+            painter.setBrush(QBrush(QColor("#4A4A4A")))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(0, 0, 44, 24, 12, 12)
+        
+        # Knob
+        knob_x = int(2 + (18 * self._animation_position))
+        painter.setBrush(QBrush(QColor("#FFFFFF")))
+        painter.drawEllipse(knob_x, 2, 20, 20)
+
 STYLE_SHEET = """
 QWidget {
     font-family: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -550,12 +587,9 @@ class MainWindow(QMainWindow):
         sep.setStyleSheet("background-color: #333333;")
         ic_layout.addWidget(sep)
         
-        # Inner Stack for Input vs Preview Settings
-        self.inner_stack = QStackedWidget()
-        
         # Inner Page 0: The Inputs
-        inputs_widget = QWidget()
-        in_grid = QGridLayout(inputs_widget)
+        self.inputs_widget = QWidget()
+        in_grid = QGridLayout(self.inputs_widget)
         in_grid.setContentsMargins(0, 0, 0, 0)
         in_grid.setSpacing(24)
         in_grid.setColumnStretch(0, 1)
@@ -569,7 +603,7 @@ class MainWindow(QMainWindow):
         u_layout.setContentsMargins(20, 20, 20, 20)
         u_layout.setSpacing(12)
         
-        u_lbl = QLabel("<span style='color: #2563EB;'>🔗</span> URL Source")
+        u_lbl = QLabel("<span style='color: #2563EB; font-family: Segoe UI Symbol, Arial;'>&#128279;</span> URL Source")
         u_lbl.setTextFormat(Qt.TextFormat.RichText)
         u_lbl.setObjectName("labelText")
         self.url_input = QLineEdit()
@@ -592,11 +626,11 @@ class MainWindow(QMainWindow):
         f_layout.setContentsMargins(20, 20, 20, 20)
         f_layout.setSpacing(12)
         
-        f_lbl = QLabel("<span style='color: #2563EB;'>📁</span> Local File")
+        f_lbl = QLabel("<span style='color: #2563EB; font-family: Segoe UI Symbol, Arial;'>&#128193;</span> Local File")
         f_lbl.setTextFormat(Qt.TextFormat.RichText)
         f_lbl.setObjectName("labelText")
         
-        browse_btn = QPushButton("📄 Browse Files...")
+        browse_btn = QPushButton("⬆ Browse Files...")
         browse_btn.setObjectName("browseBtn")
         browse_btn.clicked.connect(self.browse_files)
         
@@ -606,12 +640,13 @@ class MainWindow(QMainWindow):
         
         in_grid.addWidget(url_box, 0, 0)
         in_grid.addWidget(file_box, 0, 1)
+        in_grid.setRowStretch(1, 1)
         
-        self.inner_stack.addWidget(inputs_widget)
+        ic_layout.addWidget(self.inputs_widget)
         
         # Inner Page 1: Preview & Settings
-        preview_opts_widget = QWidget()
-        po_layout = QHBoxLayout(preview_opts_widget)
+        self.preview_opts_widget = QWidget()
+        po_layout = QHBoxLayout(self.preview_opts_widget)
         po_layout.setContentsMargins(0, 0, 0, 0)
         po_layout.setSpacing(24)
         
@@ -622,34 +657,17 @@ class MainWindow(QMainWindow):
         
         self.preview_image = QLabel()
         self.preview_image.setObjectName("thumbnailFrame")
-        self.preview_image.setMinimumSize(320, 180)
+        self.preview_image.setMinimumSize(320, 140)
         self.preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Absolute positioning overlay inside preview_image isn't clean with layouts unless we use a wrapper.
-        # Let's wrap it.
-        preview_wrap = QFrame()
-        preview_wrap.setMinimumSize(320, 180)
-        p_layout = QVBoxLayout(preview_wrap)
-        p_layout.setContentsMargins(0, 0, 0, 0)
-        p_layout.addWidget(self.preview_image)
         
         self.preview_title = QLabel("Title")
         self.preview_title.setObjectName("resultTitle")
-        self.preview_title.setStyleSheet("background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0,0,0,0), stop:1 rgba(0,0,0,220)); padding: 12px; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px;")
+        self.preview_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_title.setStyleSheet("background-color: transparent; padding: 8px 0px;")
         
-        self.preview_title.setParent(preview_wrap)
-        # We will adjust geometry dynamically or use layout. Better to use layout alignment.
-        # Let's put it back to normal layout but overlapping.
-        self.preview_title.setVisible(False) # we can set visibility or handle in resizeEvent. We'll stick to a simpler approach: Just add it as a child of preview_image later or use a layout inside it.
-        
-        # Wait, the easiest way is to let preview_title just sit inside the image using a QVBoxLayout on preview_image.
-        img_layout = QVBoxLayout(self.preview_image)
-        img_layout.setContentsMargins(0, 0, 0, 0)
-        img_layout.addWidget(self.preview_title, alignment=Qt.AlignmentFlag.AlignBottom)
-        
-        # Simulate video thumb layout
-        thumb_v.addWidget(thumb_lbl)
+        # Simulate video thumb layout - thumbnail at top, title below
         thumb_v.addWidget(self.preview_image)
+        thumb_v.addWidget(self.preview_title)
         
         play_prev = QPushButton("▶ Preview Media")
         thumb_v.addWidget(play_prev)
@@ -673,29 +691,58 @@ class MainWindow(QMainWindow):
         # Smart crop box
         sc_box = QFrame()
         sc_box.setStyleSheet("background-color: #2D2D2D; border: 1px solid #333333; border-radius: 4px;")
-        sc_layout = QVBoxLayout(sc_box)
+        sc_layout = QHBoxLayout(sc_box)
         sc_layout.setContentsMargins(12, 12, 12, 12)
-        sc_layout.setSpacing(4)
+        sc_layout.setSpacing(12)
         
-        self.smart_crop_chk = QCheckBox("Enable Smart Crop")
-        self.smart_crop_chk.setChecked(True)
-        self.smart_crop_chk.setStyleSheet("border: none; background-color: transparent;")
+        sc_text_layout = QVBoxLayout()
+        sc_text_layout.setSpacing(2)
+        
+        sc_label = QLabel("Enable Smart Crop")
+        sc_label.setObjectName("labelText")
+        sc_label.setStyleSheet("border: none; background-color: transparent;")
         
         sc_sub = QLabel("Keep speakers centered")
         sc_sub.setObjectName("mutedText")
-        sc_sub.setStyleSheet("border: none; background-color: transparent; padding-left: 28px;") # align with text
+        sc_sub.setStyleSheet("border: none; background-color: transparent;")
         
-        sc_layout.addWidget(self.smart_crop_chk)
-        sc_layout.addWidget(sc_sub)
+        sc_text_layout.addWidget(sc_label)
+        sc_text_layout.addWidget(sc_sub)
         
-        c_lbl = QLabel("Caption Style")
-        c_lbl.setObjectName("labelText")
-        self.style_combo = QComboBox()
-        self.style_combo.addItems([
-            "Hormozi Style (Bold, Emojis)", 
-            "Minimalist (Clean, Standard)", 
-            "Gaming (High Contrast)"
-        ])
+        self.smart_crop_toggle = ToggleButton()
+        self.smart_crop_toggle.setChecked(True)
+        
+        sc_layout.addLayout(sc_text_layout)
+        sc_layout.addStretch()
+        sc_layout.addWidget(self.smart_crop_toggle)
+        
+        # Auto caption box
+        ac_box = QFrame()
+        ac_box.setStyleSheet("background-color: #2D2D2D; border: 1px solid #333333; border-radius: 4px;")
+        ac_layout = QHBoxLayout(ac_box)
+        ac_layout.setContentsMargins(12, 12, 12, 12)
+        ac_layout.setSpacing(12)
+        
+        ac_text_layout = QVBoxLayout()
+        ac_text_layout.setSpacing(2)
+        
+        ac_label = QLabel("Auto Caption")
+        ac_label.setObjectName("labelText")
+        ac_label.setStyleSheet("border: none; background-color: transparent;")
+        
+        ac_sub = QLabel("Generate captions automatically")
+        ac_sub.setObjectName("mutedText")
+        ac_sub.setStyleSheet("border: none; background-color: transparent;")
+        
+        ac_text_layout.addWidget(ac_label)
+        ac_text_layout.addWidget(ac_sub)
+        
+        self.auto_caption_toggle = ToggleButton()
+        self.auto_caption_toggle.setChecked(True)
+        
+        ac_layout.addLayout(ac_text_layout)
+        ac_layout.addStretch()
+        ac_layout.addWidget(self.auto_caption_toggle)
         
         generate_btn = QPushButton("🎬 Generate Shorts")
         generate_btn.setObjectName("primaryBtn")
@@ -706,16 +753,14 @@ class MainWindow(QMainWindow):
         s_layout.addWidget(sep2)
         s_layout.addWidget(sc_box)
         s_layout.addSpacing(6)
-        s_layout.addWidget(c_lbl)
-        s_layout.addWidget(self.style_combo)
+        s_layout.addWidget(ac_box)
         s_layout.addStretch()
         s_layout.addWidget(generate_btn)
         
         po_layout.addWidget(settings_box, 1)
         
-        self.inner_stack.addWidget(preview_opts_widget)
-        
-        ic_layout.addWidget(self.inner_stack)
+        ic_layout.addWidget(self.preview_opts_widget)
+        self.preview_opts_widget.setVisible(False)
         
         self.main_stack.addWidget(self.input_card)
         
@@ -783,13 +828,16 @@ class MainWindow(QMainWindow):
         
         # Show loading state locally
         self.preview_image.setText("Loading Preview...")
-        self.inner_stack.setCurrentIndex(1)
+        self.inputs_widget.setVisible(False)
+        self.preview_opts_widget.setVisible(True)
         self.cancel_btn.setVisible(True)
         
         self.p_worker = PreviewWorker(source, is_local)
         self.p_worker.previewReady.connect(self.on_preview_ready)
         self.p_worker.errorOccurred.connect(self.on_preview_error)
         self.p_worker.start()
+
+
 
     def on_preview_ready(self, qimage, title):
         pixmap = QPixmap.fromImage(qimage)
@@ -803,7 +851,8 @@ class MainWindow(QMainWindow):
         self.url_input.blockSignals(False)
 
     def reset_input(self):
-        self.inner_stack.setCurrentIndex(0)
+        self.preview_opts_widget.setVisible(False)
+        self.inputs_widget.setVisible(True)
         self.cancel_btn.setVisible(False)
         self.url_input.clear()
         self.source = ""
