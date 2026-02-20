@@ -199,7 +199,7 @@ class GeneratorWorker(QThread):
         self.log("Switching to visual analysis (downloading video)...")
         video_path_template = os.path.join(self.output_dir, 'video_%(id)s.%(ext)s')
         ydl_opts_video = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
             'outtmpl': video_path_template,
             'quiet': True,
         }
@@ -562,7 +562,7 @@ class GeneratorWorker(QThread):
                 
                 ydl_opts_dl = {
                     'download_ranges': lambda _, __: [{'start_time': start, 'end_time': end}],
-                    'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                    'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
                     'outtmpl': temp_raw_path,
                     'quiet': True,
                     'force_keyframes_at_cuts': True,
@@ -598,13 +598,12 @@ class GeneratorWorker(QThread):
                 cap.release()
                 raise Exception(f"Invalid video properties: {width}x{height} @ {fps}fps")
             
-            # Target dimensions (9:16)
-            target_h = height
-            target_w = int(target_h * 9 / 16)
+            # Target dimensions (9:16) - Cap at 1080p
+            target_w = 1080
+            target_h = 1920
             
-            # Ensure dimensions are even (required by H.264 encoder)
-            target_w = target_w - (target_w % 2)
-            target_h = target_h - (target_h % 2)
+            # If source is smaller, we'll upscale. If larger, we'll downscale.
+            self.log(f"  Clip {i+1}: Target output resolution: {target_w}x{target_h}")
             
             # Ensure target dimensions are valid
             if target_w <= 0 or target_h <= 0:
@@ -677,8 +676,8 @@ class GeneratorWorker(QThread):
                 '-i', os.path.join(frames_dir, 'frame_%06d.jpg'),
                 '-c:v', 'libx264',
                 '-pix_fmt', 'yuv420p',
-                '-crf', '23',
-                '-preset', 'medium',
+                '-crf', '20',  # High quality (was 23)
+                '-preset', 'slow',  # Better compression (was medium)
                 temp_cropped_video
             ]
             
@@ -704,9 +703,10 @@ class GeneratorWorker(QThread):
                 '-i', temp_cropped_video,
                 '-i', temp_raw_path,
                 '-c:v', 'copy',  # Copy video stream (already encoded)
-                '-c:a', 'aac', '-b:a', '128k',
+                '-c:a', 'aac', '-b:a', '192k',  # High quality audio (was 128k)
                 '-map', '0:v:0', '-map', '1:a:0',
                 '-shortest',
+                '-movflags', '+faststart',  # Optimize for web streaming
                 out_path
             ]
             subprocess.run(cmd_merge, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

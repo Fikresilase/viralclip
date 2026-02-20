@@ -508,14 +508,18 @@ class ResultItem(QFrame):
         title_lbl.setObjectName("resultTitle")
         title_lbl.setStyleSheet("background-color: transparent; color: white; font-size: 13px;")
         title_lbl.setWordWrap(True)
+        title_lbl.setMaximumWidth(140)  # Constrain to card width minus padding
+        title_lbl.setMaximumHeight(50)  # Fixed height for title
+        title_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         
         score_lbl = QLabel(f"⭐ {score}/10")
         score_lbl.setStyleSheet("background-color: transparent; color: #60A5FA; font-size: 12px; font-weight: 700;")
+        score_lbl.setFixedHeight(20)
         
         overlay_layout.addWidget(title_lbl)
         overlay_layout.addWidget(score_lbl)
         
-        # Absolute positioning for overlay - positioned lower with more height
+        # Absolute positioning for overlay - positioned lower with fixed height
         overlay_widget.setParent(thumb_frame)
         overlay_widget.setGeometry(0, 200, 160, 84)
         
@@ -592,9 +596,13 @@ class ResultItem(QFrame):
         title_lbl.setObjectName("resultTitle")
         title_lbl.setStyleSheet("background-color: transparent; color: white; font-size: 13px;")
         title_lbl.setWordWrap(True)
+        title_lbl.setMaximumWidth(140)  # Constrain to card width minus padding
+        title_lbl.setMaximumHeight(50)  # Fixed height for title
+        title_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         
         score_lbl = QLabel(f"⭐ {score}/10")
         score_lbl.setStyleSheet("background-color: transparent; color: #60A5FA; font-size: 12px; font-weight: 700;")
+        score_lbl.setFixedHeight(20)
         
         overlay_layout.addWidget(title_lbl)
         overlay_layout.addWidget(score_lbl)
@@ -824,37 +832,54 @@ class MainWindow(QMainWindow):
         po_layout.setContentsMargins(0, 0, 0, 0)
         po_layout.setSpacing(24)
         
-        # Left: Thumb
+        # Left: Thumb (centered container)
+        thumb_container = QWidget()
+        thumb_container_layout = QVBoxLayout(thumb_container)
+        thumb_container_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
         thumb_v = QVBoxLayout()
+        thumb_v.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
         thumb_lbl = QLabel("Video Preview")
         thumb_lbl.setObjectName("labelText")
+        thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         self.preview_image = QLabel()
         self.preview_image.setObjectName("thumbnailFrame")
-        self.preview_image.setMinimumSize(320, 140)
+        self.preview_image.setFixedSize(320, 180)
         self.preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Title with fixed width and height
+        title_container = QWidget()
+        title_container.setFixedSize(320, 65)
+        title_container_layout = QVBoxLayout(title_container)
+        title_container_layout.setContentsMargins(0, 0, 0, 0)
+        title_container_layout.setAlignment(Qt.AlignmentFlag.AlignBottom)
         
         self.preview_title = QLabel("Title")
         self.preview_title.setObjectName("resultTitle")
         self.preview_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_title.setWordWrap(True)
+        self.preview_title.setMaximumWidth(320)
+        self.preview_title.setMaximumHeight(65)
         self.preview_title.setStyleSheet("background-color: transparent; padding: 8px 0px;")
         
-        # Simulate video thumb layout - thumbnail at top, title below
+        title_container_layout.addWidget(self.preview_title)
+        
+        thumb_v.addWidget(thumb_lbl)
         thumb_v.addWidget(self.preview_image)
-        thumb_v.addWidget(self.preview_title)
+        thumb_v.addWidget(title_container)
         
-        play_prev = QPushButton("▶ Preview Media")
-        thumb_v.addWidget(play_prev)
+        thumb_container_layout.addLayout(thumb_v)
         
-        po_layout.addLayout(thumb_v, 1)
+        po_layout.addWidget(thumb_container, 1)
         
         # Right: Settings
-        settings_box = QFrame()
-        # Remove innerGroup styling and shadow to match Image 2 which shows it flat inside the card
-        # Or wait, Image 2 shows settings are just directly on the card!
+        settings_box = QWidget()
         s_layout = QVBoxLayout(settings_box)
         s_layout.setContentsMargins(0, 0, 0, 0)
         s_layout.setSpacing(12)
+        s_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         s_title = QLabel("2. Generation Settings")
         s_title.setObjectName("cardTitle")
@@ -921,6 +946,7 @@ class MainWindow(QMainWindow):
         generate_btn = QPushButton("🎬 Generate Shorts")
         generate_btn.setObjectName("primaryBtn")
         generate_btn.setFixedHeight(44)
+        generate_btn.setFixedWidth(320)
         generate_btn.clicked.connect(self.on_generate)
         
         s_layout.addWidget(s_title)
@@ -928,8 +954,8 @@ class MainWindow(QMainWindow):
         s_layout.addWidget(sc_box)
         s_layout.addSpacing(6)
         s_layout.addWidget(ac_box)
-        s_layout.addStretch()
-        s_layout.addWidget(generate_btn)
+        s_layout.addSpacing(20)
+        s_layout.addWidget(generate_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         
         po_layout.addWidget(settings_box, 1)
         
