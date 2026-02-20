@@ -1,677 +1,747 @@
-"""
-main_window.py - Main application window for ViralClips.
-"""
-
+import os
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QComboBox, QFrame, QScrollArea, QSizePolicy,
-    QGraphicsDropShadowEffect, QMessageBox, QStackedWidget, QPushButton
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+    QPushButton, QLineEdit, QStackedWidget, QFileDialog, 
+    QDialog, QCheckBox, QComboBox, QGridLayout, QProgressBar,
+    QFrame, QMessageBox, QApplication, QScrollArea, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QTimer, QSettings
-from PyQt6.QtGui import QColor, QFont, QPainter, QBrush, QLinearGradient, QPen, QPixmap, QImage
+from PyQt6.QtCore import Qt, QSettings, QSize, QTimer
+from PyQt6.QtGui import QPixmap, QImage, QColor, QFont, QIcon, QPainter, QBrush, QPen
 
-# Assumed imports based on your provided context
-from src.ui.theme import (
-    PRIMARY, BG_DARK, SURFACE_DARK, SURFACE_INPUT, BORDER_DARK, TEXT_MUTED, 
-    TEXT_WHITE, BLUE_ACCENT, BLUE_ACCENT_BG, GLOBAL_STYLESHEET
-)
-from src.ui.widgets import (
-    GlowButton, UpgradeButton, ToggleSwitch, IconBadge, DropZone, ApiKeyButton,
-    PreviewWidget
-)
-from src.ui.results_view import ResultsView
 from src.workers.preview_worker import PreviewWorker
 from src.workers.generator_worker import GeneratorWorker
-from src.utils.storage import StorageManager
+
+STYLE_SHEET = """
+QWidget {
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+    font-size: 13px;
+    color: #E0E0E0;
+    background-color: #121212;
+}
+
+QMainWindow, QDialog {
+    background-color: #121212;
+}
+
+QFrame#headerPanel {
+    background-color: #1E1E1E;
+    border-bottom: 1px solid #333333;
+}
+
+QFrame#inputCard, QFrame#resultsSection, QFrame#settingsPanel {
+    background-color: #1E1E1E;
+    border: 1px solid #333333;
+    border-radius: 6px;
+}
+
+QFrame#innerGroup, QFrame#resultItem {
+    background-color: #181818;
+    border: 1px solid #333333;
+    border-radius: 6px;
+}
+
+QLineEdit, QComboBox, QPushButton, QProgressBar {
+    background-color: #2D2D2D;
+    border: 1px solid #333333;
+    border-radius: 4px;
+    padding: 6px 10px;
+    color: #E0E0E0;
+}
+
+QLineEdit:focus, QComboBox:focus {
+    border: 1px solid #2563EB;
+    background-color: #252525;
+}
+
+QPushButton:hover {
+    background-color: #3A3A3A;
+}
+
+QPushButton#primaryBtn {
+    background-color: #2563EB;
+    color: white;
+    border: none;
+    font-weight: bold;
+}
+QPushButton#primaryBtn:hover {
+    background-color: #1D4ED8;
+}
+
+QPushButton#linkBtn {
+    background-color: #2D2D2D;
+    border: 1px solid #333333;
+    color: #9CA3AF;
+    font-size: 12px;
+    padding: 4px 8px;
+}
+QPushButton#linkBtn:hover {
+    color: white;
+    background-color: #3A3A3A;
+}
+
+QPushButton#browseBtn {
+    height: 48px;
+    font-weight: bold;
+}
+
+QCheckBox {
+    spacing: 12px;
+    padding: 8px 12px;
+    background-color: #2D2D2D;
+    border: 1px solid #333333;
+    border-radius: 4px;
+}
+QCheckBox:hover {
+    background-color: #3A3A3A;
+}
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    background-color: #121212;
+    border: 1px solid #333333;
+    border-radius: 3px;
+}
+QCheckBox::indicator:checked {
+    background-color: #2563EB;
+    border-color: #2563EB;
+}
+
+QProgressBar {
+    background-color: #2D2D2D;
+    border: 1px solid #333333;
+    border-radius: 2px;
+    height: 16px;
+    text-align: center;
+}
+QProgressBar::chunk {
+    background-color: #2563EB;
+    border-radius: 2px;
+}
+
+QScrollArea {
+    background-color: transparent;
+    border: none;
+}
+
+QScrollBar:vertical {
+    border: none;
+    background: #121212;
+    width: 8px;
+    margin: 0px 0px 0px 0px;
+}
+QScrollBar::handle:vertical {
+    background: #333333;
+    min-height: 20px;
+    border-radius: 4px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #4a4a4a;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+QLabel#pageHeadingTitle {
+    font-size: 30px;
+    font-weight: bold;
+    color: #ffffff;
+    background-color: transparent;
+}
+QLabel#pageHeadingSub {
+    color: #9CA3AF;
+    font-size: 14px;
+    background-color: transparent;
+}
+QLabel#cardTitle {
+    font-size: 15px;
+    font-weight: bold;
+    color: #ffffff;
+    background-color: transparent;
+}
+QLabel#labelText {
+    font-size: 13px;
+    font-weight: bold;
+    color: #ffffff;
+    background-color: transparent;
+}
+QLabel#mutedText {
+    font-size: 12px;
+    color: #9CA3AF;
+    background-color: transparent;
+}
+QLabel#resultTitle {
+    font-size: 14px;
+    font-weight: bold;
+    color: #ffffff;
+    background-color: transparent;
+}
+
+QFrame#thumbnailFrame {
+    background-color: black;
+    border: 1px solid #333333;
+    border-radius: 6px;
+}
+"""
+
+class SettingsDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Application Settings")
+        self.setFixedSize(350, 220)
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        self.settings = QSettings()
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        header = QFrame()
+        header.setObjectName("innerGroup")
+        header.setStyleSheet("border-bottom-left-radius: 0; border-bottom-right-radius: 0;")
+        h_layout = QHBoxLayout(header)
+        title = QLabel("Application Settings")
+        title.setObjectName("cardTitle")
+        
+        close_btn = QPushButton("✖")
+        close_btn.setObjectName("linkBtn")
+        close_btn.setFixedSize(28, 28)
+        close_btn.clicked.connect(self.reject)
+        
+        h_layout.addWidget(title)
+        h_layout.addStretch()
+        h_layout.addWidget(close_btn)
+        
+        content = QWidget()
+        c_layout = QVBoxLayout(content)
+        
+        lbl = QLabel("API Key Configuration")
+        lbl.setObjectName("labelText")
+        self.api_input = QLineEdit()
+        self.api_input.setPlaceholderText("Enter Gemini API key...")
+        self.api_input.setEchoMode(QLineEdit.EchoMode.Password)
+        
+        saved_key = self.settings.value("api_key", "")
+        if saved_key:
+            self.api_input.setText(saved_key)
+            
+        c_layout.addWidget(lbl)
+        c_layout.addWidget(self.api_input)
+        c_layout.addStretch()
+        
+        btn_layout = QHBoxLayout()
+        clear_btn = QPushButton("Clear")
+        apply_btn = QPushButton("Apply")
+        apply_btn.setObjectName("primaryBtn")
+        
+        clear_btn.clicked.connect(self.clear_key)
+        apply_btn.clicked.connect(self.save_key)
+        
+        btn_layout.addStretch()
+        btn_layout.addWidget(clear_btn)
+        btn_layout.addWidget(apply_btn)
+        
+        c_layout.addLayout(btn_layout)
+        
+        layout.addWidget(header)
+        layout.addWidget(content)
+
+    def clear_key(self):
+        self.api_input.clear()
+        self.settings.remove("api_key")
+
+    def save_key(self):
+        val = self.api_input.text().strip()
+        if val:
+            self.settings.setValue("api_key", val)
+        self.accept()
+
+class LoadingDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(340, 160)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setObjectName("settingsPanel")
+        self.setStyleSheet("QDialog { background-color: #1E1E1E; border: 1px solid #333333; border-radius: 8px; }")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 24, 24, 24)
+        
+        self.title = QLabel("Processing Job")
+        self.title.setObjectName("cardTitle")
+        
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0) # Indeterminate
+        
+        self.status = QLabel("Initializing...")
+        self.status.setObjectName("mutedText")
+        self.status.setAlignment(Qt.AlignmentFlag.AlignRight)
+        
+        layout.addWidget(self.title)
+        layout.addSpacing(10)
+        layout.addWidget(self.progress)
+        layout.addSpacing(4)
+        layout.addWidget(self.status)
+
+    def update_text(self, text):
+        self.status.setText(text)
+
+class ResultItem(QFrame):
+    def __init__(self, data, parent=None):
+        super().__init__(parent)
+        self.setObjectName("resultItem")
+        self.data = data
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        
+        # Thumbnail Base
+        thumb_frame = QFrame()
+        thumb_frame.setObjectName("thumbnailFrame")
+        thumb_frame.setMinimumHeight(180)
+        thumb_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        
+        thumb_layout = QVBoxLayout(thumb_frame)
+        thumb_layout.setContentsMargins(0, 0, 0, 0)
+        
+        img_label = QLabel()
+        img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Load image
+        if os.path.exists(data.get('thumb', '')):
+            pixmap = QPixmap(data['thumb']).scaledToHeight(180, Qt.TransformationMode.SmoothTransformation)
+            img_label.setPixmap(pixmap)
+            
+        thumb_layout.addWidget(img_label)
+        
+        # Overlay title
+        title_lbl = QLabel(data.get('title', 'Generated Clip'))
+        title_lbl.setObjectName("resultTitle")
+        title_lbl.setStyleSheet("background-color: rgba(0,0,0,150); padding: 4px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px;")
+        
+        # Setup absolute-like position or just add to layout
+        thumb_layout.addWidget(title_lbl, alignment=Qt.AlignmentFlag.AlignBottom)
+        
+        # Buttons
+        play_btn = QPushButton("Play Video")
+        save_btn = QPushButton("Save Output")
+        save_btn.setObjectName("primaryBtn")
+        
+        play_btn.clicked.connect(self.play_video)
+        save_btn.clicked.connect(self.save_video)
+        
+        layout.addWidget(thumb_frame)
+        layout.addSpacing(10)
+        layout.addWidget(play_btn)
+        layout.addWidget(save_btn)
+
+    def play_video(self):
+        path = self.data.get('path', '')
+        if os.path.exists(path):
+            os.startfile(path) if os.name == 'nt' else os.system(f"xdg-open '{path}'")
+        else:
+            QMessageBox.warning(self, "Error", "Video file not found.")
+
+    def save_video(self):
+        path = self.data.get('path', '')
+        if not os.path.exists(path):
+            QMessageBox.warning(self, "Error", "Video file not found.")
+            return
+            
+        dest, _ = QFileDialog.getSaveFileName(self, "Save Video", os.path.basename(path), "Video (*.mp4)")
+        if dest:
+            import shutil
+            shutil.copy2(path, dest)
+            QMessageBox.information(self, "Success", "Video saved successfully.")
 
 
 class MainWindow(QMainWindow):
-    """Top-level application window."""
-
     def __init__(self):
         super().__init__()
-        self.storage = StorageManager()
-        # Clean up old cache on startup
-        self.storage.cleanup()
+        self.setWindowTitle("Content Factory")
+        self.resize(900, 750)
         
-        self.current_source = None
-        self.current_is_local = False
+        # Set central widget to use app background
+        self.setStyleSheet(STYLE_SHEET)
         
-        self.setWindowTitle("Content Factory — AI Video Generator")
-        self.setMinimumSize(1000, 700)
-        self.resize(1200, 850)
-        self.setStyleSheet(GLOBAL_STYLESHEET)
-
-        # ── Central Scroll Area ───────────────────────────────────────────
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setStyleSheet(f"QScrollArea {{ background: transparent; border: none; }}")
-        self.setCentralWidget(scroll)
-
-        container = QWidget()
-        container.setObjectName("container")
-        # Radial gradient background
-        container.setStyleSheet(f"""
-            QWidget#container {{
-                background: qradialgradient(
-                    cx: 0.5, cy: 0, radius: 1.2,
-                    fx: 0.5, fy: 0,
-                    stop: 0 #3d1e2e,
-                    stop: 0.6 {BG_DARK},
-                    stop: 1 {BG_DARK}
-                );
-            }}
-        """)
-        scroll.setWidget(container)
-
-        # Root layout for the whole page
-        root_layout = QVBoxLayout(container)
-        root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(0)
-
-        # ── 1. Header ─────────────────────────────────────────────────────
-        root_layout.addWidget(self._build_header())
-
-        # ── 2. Body (Centered Content) ────────────────────────────────────
-        body = QWidget()
-        body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(24, 32, 24, 32)
-        body_layout.setSpacing(40)
-        body_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-
-        # Hero heading
-        self.hero_widget = self._build_hero()
-        body_layout.addWidget(self.hero_widget, alignment=Qt.AlignmentFlag.AlignHCenter)
-
-        # Main Interface Card
-        body_layout.addSpacing(8)
-        body_layout.addWidget(self._build_main_card(), alignment=Qt.AlignmentFlag.AlignHCenter)
+        self.settings = QSettings()
         
-        # Results View (Full Width Container)
-        self.results_container = QWidget()
-        self.results_container.setMaximumWidth(1400)  # max-w-7xl equivalent
-        results_container_layout = QVBoxLayout(self.results_container)
-        results_container_layout.setContentsMargins(0, 0, 0, 0)
-        results_container_layout.setSpacing(0)
+        self.source = None
+        self.is_local = False
         
-        # Move results view here
-        self.results_view_main = ResultsView()
-        self.results_view_main.hide()
-        self.results_view_main.back_btn.clicked.connect(self._reset_input_mode)
-        results_container_layout.addWidget(self.results_view_main)
-        
-        body_layout.addWidget(self.results_container, alignment=Qt.AlignmentFlag.AlignHCenter)
-        
-        # Bottom stretch to push content up if window is huge
-        body_layout.addStretch()
+        self._init_ui()
 
-        root_layout.addWidget(body)
-
-    # ══════════════════════════════════════════════════════════════════════
-    #  HEADER
-    # ══════════════════════════════════════════════════════════════════════
-    def _build_header(self) -> QWidget:
-        """Sticky top bar with logo and buttons matching web design."""
+    def _init_ui(self):
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Header (ToolBar equivalent)
         header = QFrame()
-        header.setFixedHeight(64)
-        header.setStyleSheet(f"""
-            QFrame {{
-                background-color: {BG_DARK};
-                border: none;
-                border-bottom: 1px solid {BORDER_DARK};
-            }}
-        """)
-
-        layout = QHBoxLayout(header)
-        layout.setContentsMargins(48, 0, 48, 0)
-        layout.setSpacing(24)
-
-        # Logo Section
-        logo_layout = QHBoxLayout()
-        logo_layout.setSpacing(12)
-
-        robot_icon = QLabel("🏭")
-        robot_icon.setFont(QFont("Segoe UI Emoji", 20))
-        robot_icon.setFixedSize(28, 28)
-        robot_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        robot_icon.setStyleSheet(f"color: {PRIMARY};")
-        logo_layout.addWidget(robot_icon)
-
-        title = QLabel("Content Factory")
-        title.setFont(QFont("Space Grotesk", 18, QFont.Weight.Bold))
-        title.setStyleSheet(f"color: white;")
-        logo_layout.addWidget(title)
-
-        layout.addLayout(logo_layout)
-        layout.addStretch()
-
-        # Action Buttons
-        layout.addWidget(ApiKeyButton())
-        layout.addWidget(UpgradeButton())
-
-        return header
-
-    # ══════════════════════════════════════════════════════════════════════
-    #  HERO HEADING
-    # ══════════════════════════════════════════════════════════════════════
-    def _build_hero(self) -> QWidget:
-        """Centered heading + subtitle matching web design."""
-        hero = QWidget()
-        hero.setMaximumWidth(900)
-        layout = QVBoxLayout(hero)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        # Main heading
-        heading = QLabel()
-        heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        heading.setFont(QFont("Space Grotesk", 40, QFont.Weight.Bold))
-        heading.setText(
-            f'<div style="text-align: center; color: white; line-height: 1.15;">'
-            f'Turn long videos into<br>'
-            f'<span style="color: {PRIMARY};">viral Shorts</span> instantly.'
-            f'</div>'
-        )
-        heading.setTextFormat(Qt.TextFormat.RichText)
-        layout.addWidget(heading)
-
-        # Subtitle
-        subtitle = QLabel("Paste a link, customize your vibe, and let AI do the editing, captioning, and b-roll.")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        subtitle.setFont(QFont("Space Grotesk", 14))
-        subtitle.setStyleSheet(f"color: {TEXT_MUTED};")
-        subtitle.setWordWrap(False)
-        subtitle.setMaximumWidth(900)
-        layout.addWidget(subtitle, alignment=Qt.AlignmentFlag.AlignHCenter)
-
-        return hero
-
-    # ══════════════════════════════════════════════════════════════════════
-    #  MAIN CARD
-    # ══════════════════════════════════════════════════════════════════════
-    def _build_main_card(self) -> QWidget:
-        """The large rounded card containing inputs matching web design."""
-        self.main_card = QFrame()
-        self.main_card.setFixedWidth(720)
-        self.main_card.setObjectName("mainCard")
-        self.main_card.setStyleSheet(f"""
-            QFrame#mainCard {{
-                background-color: {SURFACE_DARK};
-                border: 1px solid {BORDER_DARK};
-                border-radius: 24px;
-            }}
-        """)
-
-        # Shadow
-        shadow = QGraphicsDropShadowEffect(self.main_card)
-        shadow.setBlurRadius(80)
-        shadow.setColor(QColor(0, 0, 0, 150))
-        shadow.setOffset(0, 10)
-        self.main_card.setGraphicsEffect(shadow)
-
-        layout = QVBoxLayout(self.main_card)
-        layout.setContentsMargins(32, 32, 32, 32)
-        layout.setSpacing(0)
-
-        # ── Top Row Container (Swappable) ────────────────────────────────
-        self.top_container = QWidget()
-        self.top_layout = QVBoxLayout(self.top_container)
-        self.top_layout.setContentsMargins(0, 0, 0, 0)
+        header.setObjectName("headerPanel")
+        header.setFixedHeight(60)
+        h_layout = QHBoxLayout(header)
+        h_layout.setContentsMargins(20, 0, 20, 0)
         
-        # 1. Input View
-        self.input_view = QWidget()
-        input_layout = QHBoxLayout(self.input_view)
-        input_layout.setContentsMargins(0, 0, 0, 0)
-        input_layout.setSpacing(0)
+        title_box = QHBoxLayout()
+        icon_lbl = QLabel("🤖")
+        icon_lbl.setStyleSheet("font-size: 20px; background-color: transparent;")
+        app_title = QLabel("Content Factory")
+        app_title.setStyleSheet("font-weight: bold; font-size: 15px; color: white; background-color: transparent;")
+        title_box.addWidget(icon_lbl)
+        title_box.addWidget(app_title)
+        title_box.addStretch()
         
-        # Left: URL
-        input_layout.addLayout(self._build_url_section(), stretch=1)
+        action_box = QHBoxLayout()
+        api_btn = QPushButton("🔑 API Key")
+        upgrade_btn = QPushButton("⚡ Upgrade to pro")
+        upgrade_btn.setObjectName("primaryBtn")
         
-        # Center: Divider
-        input_layout.addWidget(self._build_or_divider())
-
-        # Right: Upload
-        input_layout.addLayout(self._build_upload_section(), stretch=1)
+        api_btn.clicked.connect(self.open_settings)
         
-        self.top_layout.addWidget(self.input_view)
+        action_box.addWidget(api_btn)
+        action_box.addWidget(upgrade_btn)
         
-        # 2. Preview View
-        self.preview_widget = PreviewWidget()
-        self.preview_widget.hide()
-        self.preview_widget.removeClicked.connect(self._reset_input_mode)
-        self.top_layout.addWidget(self.preview_widget)
-
-
-
-        layout.addWidget(self.top_container)
-
-        # ── Options Section (Hidden initially) ──
-        self.options_container = QWidget()
-        self.options_container.hide()
-        options_layout = QVBoxLayout(self.options_container)
-        options_layout.setContentsMargins(0, 24, 0, 0)
-        options_layout.setSpacing(20)
-
-        # Settings
-        settings_row = QHBoxLayout()
-        settings_row.setSpacing(16)
-        settings_row.addWidget(self._build_smart_transform_card(), stretch=1)
-        settings_row.addWidget(self._build_language_card(), stretch=1)
-        options_layout.addLayout(settings_row)
+        h_layout.addLayout(title_box)
+        h_layout.addLayout(action_box)
         
-        # Button
-        self.generate_btn = GlowButton("Generate Shorts")
-        self.generate_btn.clicked.connect(self._on_generate)
-        options_layout.addWidget(self.generate_btn)
-
-        layout.addWidget(self.options_container)
-
-        return self.main_card
-
-    # ── URL Input Section ──────────────────────────────────────────────────
-    def _build_url_section(self) -> QVBoxLayout:
-        layout = QVBoxLayout()
-        layout.setSpacing(12)
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        # Header
-        header = QHBoxLayout()
-        header.setSpacing(8)
-        header.addWidget(IconBadge("🔗", f"rgba(244, 37, 140, 0.15)", PRIMARY, size=24))
+        main_layout.addWidget(header)
         
-        lbl = QLabel("Paste URL")
-        lbl.setFont(QFont("Space Grotesk", 13, QFont.Weight.Bold))
-        lbl.setStyleSheet("color: white;")
-        header.addWidget(lbl)
-        header.addStretch()
-        layout.addLayout(header)
-
-        # Input Container with icon
-        input_container = QWidget()
-        input_container.setFixedHeight(48)
-        input_layout = QHBoxLayout(input_container)
-        input_layout.setContentsMargins(0, 0, 0, 0)
-        input_layout.setSpacing(0)
+        # Content Area - scrollable stack
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(40, 24, 40, 24)
+        scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
         
+        content_container = QWidget()
+        content_container.setMaximumWidth(850)
+        cc_layout = QVBoxLayout(content_container)
+        cc_layout.setContentsMargins(0,0,0,0)
+        cc_layout.setSpacing(24)
+        
+        # Top Heading (Visible only on Page 0)
+        self.heading_widget = QWidget()
+        hw_layout = QVBoxLayout(self.heading_widget)
+        hw_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hw_layout.setContentsMargins(0,0,0,0)
+        hw_layout.setSpacing(8)
+        
+        h1 = QLabel("Automated Video Shorts")
+        h1.setObjectName("pageHeadingTitle")
+        h1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        h2 = QLabel("Provide a video source to begin extraction and generation.")
+        h2.setObjectName("pageHeadingSub")
+        h2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        hw_layout.addWidget(h1)
+        hw_layout.addWidget(h2)
+        cc_layout.addWidget(self.heading_widget)
+        
+        # Main Stacks
+        self.main_stack = QStackedWidget()
+        cc_layout.addWidget(self.main_stack)
+        
+        scroll_layout.addWidget(content_container)
+        scroll_area.setWidget(scroll_content)
+        main_layout.addWidget(scroll_area)
+        
+        # --- Page 0: Input Card ---
+        self.input_card = QFrame()
+        self.input_card.setObjectName("inputCard")
+        ic_layout = QVBoxLayout(self.input_card)
+        ic_layout.setContentsMargins(24, 24, 24, 24)
+        ic_layout.setSpacing(16)
+        
+        # Card Header
+        card_header = QHBoxLayout()
+        lbl_1 = QLabel("1. Select Media Source")
+        lbl_1.setObjectName("cardTitle")
+        
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setObjectName("linkBtn")
+        self.cancel_btn.setVisible(False)
+        self.cancel_btn.clicked.connect(self.reset_input)
+        
+        card_header.addWidget(lbl_1)
+        card_header.addStretch()
+        card_header.addWidget(self.cancel_btn)
+        ic_layout.addLayout(card_header)
+        
+        # Separator line
+        sep = QFrame()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet("background-color: #333333;")
+        ic_layout.addWidget(sep)
+        
+        # Inner Stack for Input vs Preview Settings
+        self.inner_stack = QStackedWidget()
+        
+        # Inner Page 0: The Inputs
+        inputs_widget = QWidget()
+        in_grid = QGridLayout(inputs_widget)
+        in_grid.setContentsMargins(0, 0, 0, 0)
+        in_grid.setSpacing(24)
+        
+        # URL Block
+        url_box = QFrame()
+        url_box.setObjectName("innerGroup")
+        u_layout = QVBoxLayout(url_box)
+        u_layout.setSpacing(8)
+        
+        u_lbl = QLabel("🔗 URL Source")
+        u_lbl.setObjectName("labelText")
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("https://youtube.com/...")
-        self.url_input.setFixedHeight(48)
-        self.url_input.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: {SURFACE_INPUT};
-                border: 1px solid {BORDER_DARK};
-                border-radius: 10px;
-                padding-left: 40px;
-                padding-right: 70px;
-                color: {TEXT_WHITE};
-                font-size: 13px;
-                font-family: "Space Grotesk";
-                font-weight: 400;
-            }}
-            QLineEdit:focus {{
-                border: 1px solid {PRIMARY};
-                background-color: rgba(59, 35, 48, 0.9);
-            }}
-            QLineEdit::placeholder {{
-                color: rgba(186, 156, 171, 0.4);
-            }}
-        """)
-        self.url_input.textChanged.connect(self._on_url_text_changed)
+        self.url_input.textChanged.connect(self.on_url_changed)
         
-        # Link icon overlay
-        link_icon = QLabel("🔗", self.url_input)
-        link_icon.setFixedSize(16, 16)
-        link_icon.move(14, 16)
-        link_icon.setStyleSheet(f"color: {TEXT_MUTED}; background: transparent; border: none; font-size: 14px;")
+        u_sub = QLabel("Paste a link to any public video.")
+        u_sub.setObjectName("mutedText")
         
-        # OR button on the right
-        or_btn = QPushButton("OR", self.url_input)
-        or_btn.setFixedSize(42, 28)
-        or_btn.setCursor(Qt.CursorShape.ArrowCursor)
-        or_btn.setEnabled(False)
-        or_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: rgba(84, 59, 71, 0.5);
-                color: {TEXT_MUTED};
-                border: 1px solid {BORDER_DARK};
-                border-radius: 6px;
-                font-size: 10px;
-                font-weight: 700;
-                font-family: "Space Grotesk";
-            }}
-        """)
-        or_btn.move(self.url_input.width() - 56, 10)
+        u_layout.addWidget(u_lbl)
+        u_layout.addWidget(self.url_input)
+        u_layout.addWidget(u_sub)
         
-        input_layout.addWidget(self.url_input)
-        layout.addWidget(input_container)
-
-        # Debounce timer for URL input
-        self.url_timer = QTimer()
-        self.url_timer.setSingleShot(True)
-        self.url_timer.setInterval(800) # 800ms debounce
-        self.url_timer.timeout.connect(self._process_url_input)
-
-        # Helper
-        helper = QLabel("Supports YouTube, TikTok, and Instagram Reels")
-        helper.setFont(QFont("Space Grotesk", 10))
-        helper.setStyleSheet(f"color: {TEXT_MUTED}; padding-left: 0px;")
-        helper.setWordWrap(True)
-        layout.addWidget(helper)
-
-        return layout
-
-    # ── Upload Section ─────────────────────────────────────────────────────
-    def _build_upload_section(self) -> QVBoxLayout:
-        layout = QVBoxLayout()
-        layout.setSpacing(12)
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        # Header
-        header = QHBoxLayout()
-        header.setSpacing(8)
-        header.addWidget(IconBadge("📄", "rgba(96, 165, 250, 0.15)", BLUE_ACCENT, size=24))
+        # File Block
+        file_box = QFrame()
+        file_box.setObjectName("innerGroup")
+        f_layout = QVBoxLayout(file_box)
+        f_layout.setSpacing(8)
         
-        lbl = QLabel("Upload File")
-        lbl.setFont(QFont("Space Grotesk", 13, QFont.Weight.Bold))
-        lbl.setStyleSheet("color: white;")
-        header.addWidget(lbl)
-        header.addStretch()
-        layout.addLayout(header)
-
-        # Drop Zone
-        self.drop_zone = DropZone()
-        self.drop_zone.fileDropped.connect(self._on_file_dropped)
-        layout.addWidget(self.drop_zone)
-
-        return layout
-
-    def _build_or_divider(self) -> QWidget:
-        divider = _OrDivider()
-        return divider
-
-    # ── Smart Transform Card ───────────────────────────────────────────────
-    def _build_smart_transform_card(self) -> QFrame:
-        card = QFrame()
-        card.setFixedHeight(80)
-        card.setStyleSheet(f"""
-            QFrame {{
-                background-color: rgba(59, 35, 48, 0.3);
-                border: 1px solid {BORDER_DARK};
-                border-radius: 12px;
-            }}
-            QFrame:hover {{ border-color: rgba(244, 37, 140, 0.3); }}
-        """)
+        f_lbl = QLabel("📂 Local File")
+        f_lbl.setObjectName("labelText")
         
-        layout = QHBoxLayout(card)
-        layout.setContentsMargins(20, 0, 20, 0)
-        layout.setSpacing(16)
-
-        icon = QLabel("✨")
-        icon.setFixedSize(40, 40)
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setStyleSheet(f"background-color: {BG_DARK}; border-radius: 8px; font-size: 18px;")
-        layout.addWidget(icon)
-
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(2)
-        text_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        browse_btn = QPushButton("Upload Files...")
+        browse_btn.setObjectName("browseBtn")
+        browse_btn.clicked.connect(self.browse_files)
         
-        title = QLabel("Smart Transform")
-        title.setFont(QFont("Space Grotesk", 13, QFont.Weight.Medium))
-        title.setStyleSheet("color: white;")
-        text_layout.addWidget(title)
-
-        desc = QLabel("Reduce similarity & copyright strikes")
-        desc.setFont(QFont("Space Grotesk", 10))
-        desc.setStyleSheet(f"color: {TEXT_MUTED};")
-        text_layout.addWidget(desc)
+        f_layout.addWidget(f_lbl)
+        f_layout.addWidget(browse_btn)
+        f_layout.addStretch()
         
-        layout.addLayout(text_layout)
-        layout.addStretch()
-
-        self.smart_toggle = ToggleSwitch()
-        layout.addWidget(self.smart_toggle)
-
-        return card
-
-    # ── Language Card ──────────────────────────────────────────────────────
-    def _build_language_card(self) -> QFrame:
-        card = QFrame()
-        card.setFixedHeight(80)
-        card.setStyleSheet(f"""
-            QFrame {{
-                background-color: rgba(59, 35, 48, 0.3);
-                border: 1px solid {BORDER_DARK};
-                border-radius: 12px;
-            }}
-            QFrame:hover {{ border-color: rgba(244, 37, 140, 0.3); }}
-        """)
+        in_grid.addWidget(url_box, 0, 0)
+        in_grid.addWidget(file_box, 0, 1)
         
-        layout = QHBoxLayout(card)
-        layout.setContentsMargins(20, 0, 20, 0)
-        layout.setSpacing(16)
-
-        icon = QLabel("🌐")
-        icon.setFixedSize(40, 40)
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setStyleSheet(f"background-color: {BG_DARK}; border-radius: 8px; font-size: 18px;")
-        layout.addWidget(icon)
-
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(2)
-        text_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-
-        lbl = QLabel("Output Language")
-        lbl.setFont(QFont("Space Grotesk", 10))
-        lbl.setStyleSheet(f"color: {TEXT_MUTED};")
-        text_layout.addWidget(lbl)
-
-        self.language_combo = QComboBox()
-        self.language_combo.addItems(["English (US)", "Spanish", "French", "German", "Japanese"])
-        self.language_combo.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.language_combo.setFont(QFont("Space Grotesk", 13, QFont.Weight.Medium))
-        self.language_combo.setStyleSheet("color: white;")
-        text_layout.addWidget(self.language_combo)
-
-        layout.addLayout(text_layout)
-        layout.addStretch()
-
-        return card
-
-    # ══════════════════════════════════════════════════════════════════════
-    #  SLOTS
-    # ══════════════════════════════════════════════════════════════════════
-    def _on_generate(self):
-        """Handle Generate Shorts button click."""
-        if not self.current_source:
-             QMessageBox.warning(self, "Error", "No video selected.")
-             return
-
-        # Get API Key
-        settings = QSettings("ViralClips", "Content Factory")
-        api_key = settings.value("gemini_api_key", "")
-        if not api_key:
-            QMessageBox.warning(self, "Error", "Please set your Gemini API Key first (top right button).")
-            return
-
-        # Disable UI
-        self.generate_btn.setEnabled(False)
-        self.generate_btn.setText("Processing... ⏳")
-        self.input_view.hide()
-        self.preview_widget.hide()
-        self.options_container.hide()
+        self.inner_stack.addWidget(inputs_widget)
         
-        # Reuse preview widget loading state for progress
-        self.preview_widget.show()
-        self.preview_widget.set_loading(True)
-        # Access internal label directly or add a method. For now, hack it:
-        self.preview_widget._loading_label.setText("Analyzing Content with Gemini AI...\nDepending on video length, this can take a few minutes.")
-
-        # Start Worker
-        self.gen_worker = GeneratorWorker(self.current_source, self.current_is_local, api_key)
-        self.gen_worker.finished.connect(self._on_generation_finished)
-        self.gen_worker.error.connect(self._on_generation_error)
-        self.gen_worker.progress.connect(self._on_generation_progress)
-        self.gen_worker.start()
-
-    def _on_generation_progress(self, msg):
-        if self.preview_widget.isVisible():
-             self.preview_widget._loading_label.setText(msg)
-
-    def _on_generation_finished(self, results):
-        self.generate_btn.setEnabled(True)
-        self.generate_btn.setText("Generate Shorts   ✨")
+        # Inner Page 1: Preview & Settings
+        preview_opts_widget = QWidget()
+        po_layout = QHBoxLayout(preview_opts_widget)
+        po_layout.setContentsMargins(0, 0, 0, 0)
+        po_layout.setSpacing(24)
         
-        # Hide all input UI
-        self.preview_widget.hide()
-        self.options_container.hide()
-        self.main_card.hide()
-        self.hero_widget.hide()
+        # Left: Thumb
+        thumb_v = QVBoxLayout()
+        thumb_lbl = QLabel("Video Preview")
+        thumb_lbl.setObjectName("labelText")
         
-        # Show results in full-width container
-        self.results_view_main.populate(results)
-        self.results_container.show()
-        self.results_view_main.show()
+        self.preview_image = QLabel()
+        self.preview_image.setObjectName("thumbnailFrame")
+        self.preview_image.setMinimumSize(320, 180)
+        self.preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.preview_title = QLabel("Title")
+        self.preview_title.setObjectName("resultTitle")
+        
+        # Simulate video thumb layout
+        thumb_v.addWidget(thumb_lbl)
+        thumb_v.addWidget(self.preview_image)
+        thumb_v.addWidget(self.preview_title)
+        
+        play_prev = QPushButton("▶ Preview Media")
+        thumb_v.addWidget(play_prev)
+        
+        po_layout.addLayout(thumb_v, 1)
+        
+        # Right: Settings
+        settings_box = QFrame()
+        settings_box.setObjectName("innerGroup")
+        s_layout = QVBoxLayout(settings_box)
+        s_layout.setSpacing(12)
+        
+        s_title = QLabel("2. Generation Settings")
+        s_title.setObjectName("labelText")
+        sep2 = QFrame()
+        sep2.setFixedHeight(1)
+        sep2.setStyleSheet("background-color: #333333;")
+        
+        self.smart_crop_chk = QCheckBox("Enable Smart Crop")
+        self.smart_crop_chk.setChecked(True)
+        # Using rich text or layout for subtitle is complex in QCheckbox, so appending
+        
+        c_lbl = QLabel("Caption Style")
+        c_lbl.setObjectName("labelText")
+        self.style_combo = QComboBox()
+        self.style_combo.addItems([
+            "Hormozi Style (Bold, Emojis)", 
+            "Minimalist (Clean, Standard)", 
+            "Gaming (High Contrast)"
+        ])
+        
+        generate_btn = QPushButton("🎞️ Generate Shorts")
+        generate_btn.setObjectName("primaryBtn")
+        generate_btn.setFixedHeight(44)
+        generate_btn.clicked.connect(self.on_generate)
+        
+        s_layout.addWidget(s_title)
+        s_layout.addWidget(sep2)
+        s_layout.addWidget(self.smart_crop_chk)
+        s_layout.addSpacing(10)
+        s_layout.addWidget(c_lbl)
+        s_layout.addWidget(self.style_combo)
+        s_layout.addStretch()
+        s_layout.addWidget(generate_btn)
+        
+        po_layout.addWidget(settings_box, 1)
+        
+        self.inner_stack.addWidget(preview_opts_widget)
+        
+        ic_layout.addWidget(self.inner_stack)
+        
+        self.main_stack.addWidget(self.input_card)
+        
+        # --- Page 1: Results Section ---
+        self.results_section = QFrame()
+        self.results_section.setObjectName("resultsSection")
+        res_layout = QVBoxLayout(self.results_section)
+        res_layout.setContentsMargins(24, 24, 24, 24)
+        res_layout.setSpacing(16)
+        
+        res_header = QHBoxLayout()
+        res_title = QLabel("🎬 Output Gallery")
+        res_title.setObjectName("cardTitle")
+        
+        restart_btn = QPushButton("🔄 Start Over")
+        restart_btn.setObjectName("linkBtn")
+        restart_btn.clicked.connect(self.reset_all)
+        
+        res_header.addWidget(res_title)
+        res_header.addStretch()
+        res_header.addWidget(restart_btn)
+        res_layout.addLayout(res_header)
+        
+        sep3 = QFrame()
+        sep3.setFixedHeight(1)
+        sep3.setStyleSheet("background-color: #333333;")
+        res_layout.addWidget(sep3)
+        
+        # Grid for Outputs
+        self.results_grid_widget = QWidget()
+        self.results_grid = QGridLayout(self.results_grid_widget)
+        self.results_grid.setSpacing(16)
+        
+        res_layout.addWidget(self.results_grid_widget)
+        
+        self.main_stack.addWidget(self.results_section)
+        
+        # Keep references to dialogs
+        self.loading_dialog = None
 
-    def _on_generation_error(self, err):
-        self.generate_btn.setEnabled(True)
-        self.generate_btn.setText("Generate Shorts   ✨")
-        
-        # Restore preview state
-        self.preview_widget.hide()
-        self.results_view_main.hide()
-        self.results_container.hide()
-        
-        self.main_card.show()
-        self.hero_widget.show()
-        self.preview_widget.show()
-        self.preview_widget.set_loading(False)
-        self.options_container.show()
-        
-        QMessageBox.critical(self, "Generation Failed", f"Error: {err}")
+    def open_settings(self):
+        dlg = SettingsDialog(self)
+        dlg.exec()
 
-    def _on_file_dropped(self, path: str):
-        """Handle file drop."""
-        print(f"File dropped: {path}")
-        self._start_preview(path, is_local=True)
+    def on_url_changed(self, text):
+        if "http" in text:
+            # Short delay to allow user to paste fully
+            QTimer.singleShot(300, lambda: self.start_preview(self.url_input.text().strip(), False))
 
-    def _on_url_text_changed(self):
-        """Restart debounce timer on text change."""
-        self.url_timer.start()
-        
-    def _process_url_input(self):
-        """Check if URL is valid and start preview."""
-        text = self.url_input.text().strip()
-        if not text:
+    def browse_files(self):
+        fname, _ = QFileDialog.getOpenFileName(self, 'Open file', '', "Video files (*.mp4 *.mkv *.avi *.mov)")
+        if fname:
+            self.start_preview(fname, True)
+
+    def start_preview(self, source, is_local):
+        if not source:
             return
             
-        # Basic check if it looks like a URL
-        if "youtube.com" in text or "youtu.be" in text:
-            self._start_preview(text, is_local=False)
+        self.source = source
+        self.is_local = is_local
+        
+        # Prevent double triggers
+        self.url_input.blockSignals(True)
+        
+        # Show loading state locally
+        self.preview_image.setText("Loading Preview...")
+        self.inner_stack.setCurrentIndex(1)
+        self.cancel_btn.setVisible(True)
+        
+        self.p_worker = PreviewWorker(source, is_local)
+        self.p_worker.previewReady.connect(self.on_preview_ready)
+        self.p_worker.errorOccurred.connect(self.on_preview_error)
+        self.p_worker.start()
 
-    def _start_preview(self, source: str, is_local: bool):
-        """Switch to preview mode and start worker."""
-        self.current_source = source
-        self.current_is_local = is_local
-        
-        # Update UI state
-        self.input_view.hide()
-        self.results_view_main.hide()
-        self.results_container.hide()
-        self.preview_widget.show()
-        self.options_container.show()
-        self.preview_widget.set_loading(True)
-        
-        # Cleanup old worker
-        if hasattr(self, 'worker') and self.worker:
-            self.worker.quit()
-            self.worker.wait()
-            
-        # Start new worker
-        self.worker = PreviewWorker(source, is_local)
-        self.worker.previewReady.connect(self._on_preview_ready)
-        self.worker.errorOccurred.connect(self._on_preview_error)
-        self.worker.start()
+    def on_preview_ready(self, qimage, title):
+        pixmap = QPixmap.fromImage(qimage)
+        self.preview_image.setPixmap(pixmap.scaled(self.preview_image.size(), Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation))
+        self.preview_title.setText(title)
+        self.url_input.blockSignals(False)
 
-    def closeEvent(self, event):
-        """Cleanup resources on close."""
-        if hasattr(self, 'storage'):
-            self.storage.cleanup()
-        super().closeEvent(event)
+    def on_preview_error(self, msg):
+        QMessageBox.warning(self, "Preview Error", f"Failed to fetch preview:\n{msg}")
+        self.reset_input()
+        self.url_input.blockSignals(False)
 
-    def _on_preview_ready(self, image: QImage, title: str):
-        """Handle successful preview."""
-        pixmap = QPixmap.fromImage(image)
-        self.preview_widget.set_preview(pixmap, title)
-        
-    def _on_preview_error(self, error: str):
-        """Handle preview error."""
-        self.preview_widget.set_error(error)
-        print(f"Preview Error: {error}")
-        
-    def _reset_input_mode(self):
-        """Go back to input mode."""
-        self.preview_widget.hide()
-        self.results_view_main.hide()
-        self.results_container.hide()
-        self.options_container.hide()
-        
-        # Show input UI
-        self.main_card.show()
-        self.hero_widget.show()
-        self.input_view.show()
+    def reset_input(self):
+        self.inner_stack.setCurrentIndex(0)
+        self.cancel_btn.setVisible(False)
         self.url_input.clear()
-        
-        self.current_source = None
-        self.current_is_local = False
-        
-        if hasattr(self, 'worker') and self.worker:
-            self.worker.terminate()
-            self.worker.wait()
+        self.source = None
+        self.is_local = False
+        self.preview_image.clear()
+        self.preview_title.clear()
 
+    def on_generate(self):
+        api_key = self.settings.value("api_key", "").strip()
+        if not api_key:
+            QMessageBox.warning(self, "API Key Required", "Please configure your Gemini API Key in Settings first.")
+            self.open_settings()
+            return
+            
+        self.loading_dialog = LoadingDialog(self)
+        self.loading_dialog.show()
+        
+        self.g_worker = GeneratorWorker(self.source, self.is_local, api_key)
+        self.g_worker.progress.connect(self.loading_dialog.update_text)
+        self.g_worker.finished.connect(self.on_generate_finished)
+        self.g_worker.error.connect(self.on_generate_error)
+        self.g_worker.start()
 
-class _OrDivider(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setFixedWidth(60)
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+    def on_generate_finished(self, results):
+        if self.loading_dialog:
+            self.loading_dialog.accept()
+            
+        self.populate_results(results)
+        self.heading_widget.setVisible(False)
+        self.main_stack.setCurrentIndex(1)
 
-    def paintEvent(self, a0):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        w, h = self.width(), self.height()
-        cx = w // 2
-        cy = h // 2
-        
-        # Solid line with gradient fade
-        grad = QLinearGradient(cx, 0, cx, h)
-        grad.setColorAt(0, QColor(0, 0, 0, 0))
-        grad.setColorAt(0.35, QColor(BORDER_DARK))
-        grad.setColorAt(0.65, QColor(BORDER_DARK))
-        grad.setColorAt(1, QColor(0, 0, 0, 0))
-        
-        pen = QPen()
-        pen.setBrush(QBrush(grad))
-        pen.setWidth(1)
-        p.setPen(pen)
-        p.drawLine(cx, 0, cx, h)
-        
-        # Badge
-        # Clear background behind text
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(QColor(SURFACE_DARK)))
-        p.drawEllipse(cx - 16, cy - 16, 32, 32)
-        
-        # Border for badge
-        p.setPen(QPen(QColor(BORDER_DARK), 1))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawEllipse(cx - 16, cy - 16, 32, 32)
-        
-        # Text
-        p.setPen(QColor(TEXT_MUTED))
-        p.setFont(QFont("Space Grotesk", 9, QFont.Weight.Bold))
-        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "OR")
+    def on_generate_error(self, err):
+        if self.loading_dialog:
+            self.loading_dialog.accept()
+        QMessageBox.critical(self, "Generation Error", str(err))
+
+    def populate_results(self, results):
+        # Clear existing
+        for i in reversed(range(self.results_grid.count())): 
+            w = self.results_grid.itemAt(i).widget()
+            if w:
+                w.setParent(None)
+                w.deleteLater()
+                
+        if not results:
+            lbl = QLabel("No viral moments found.")
+            self.results_grid.addWidget(lbl, 0, 0)
+            return
+
+        for i, res in enumerate(results):
+            row = i // 4
+            col = i % 4
+            item_widget = ResultItem(res, self)
+            self.results_grid.addWidget(item_widget, row, col)
+
+    def reset_all(self):
+        self.reset_input()
+        self.heading_widget.setVisible(True)
+        self.main_stack.setCurrentIndex(0)
