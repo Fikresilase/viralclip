@@ -433,11 +433,12 @@ class LoadingDialog(QDialog):
         self.status.setText(text)
 
 class ResultItem(QFrame):
-    def __init__(self, data, parent=None):
+    def __init__(self, data, parent=None, is_placeholder=False):
         super().__init__(parent)
         self.setObjectName("resultItem")
         add_shadow(self, radius=12, y_offset=4, alpha=30)
         self.data = data
+        self.is_placeholder = is_placeholder
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -450,27 +451,157 @@ class ResultItem(QFrame):
         thumb_layout = QVBoxLayout(thumb_frame)
         thumb_layout.setContentsMargins(0, 0, 0, 0)
         
+        if is_placeholder:
+            # Show progress bar instead of image
+            progress_container = QWidget()
+            progress_container.setStyleSheet("background-color: transparent;")
+            progress_layout = QVBoxLayout(progress_container)
+            progress_layout.setContentsMargins(20, 100, 20, 100)
+            
+            self.progress_bar = QProgressBar()
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setTextVisible(True)
+            self.progress_bar.setFormat("%p%")
+            
+            self.status_label = QLabel("Processing")
+            self.status_label.setObjectName("mutedText")
+            self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.status_label.setStyleSheet("background-color: transparent; color: #9CA3AF;")
+            
+            progress_layout.addWidget(self.progress_bar)
+            progress_layout.addSpacing(10)
+            progress_layout.addWidget(self.status_label)
+            progress_layout.addStretch()
+            
+            thumb_layout.addWidget(progress_container)
+        else:
+            # Show actual image
+            img_label = QLabel()
+            img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            
+            # Load image
+            if os.path.exists(data.get('thumb', '')):
+                pixmap = QPixmap(data['thumb']).scaled(160, 284, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+                img_label.setPixmap(pixmap)
+                
+            thumb_layout.addWidget(img_label)
+        
+        # Title and score overlay (always visible)
+        title_text = data.get('title', 'Generated Clip')
+        score = data.get('score', 0)
+        
+        overlay_widget = QWidget()
+        overlay_widget.setStyleSheet("""
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                stop:0 rgba(0,0,0,0), 
+                stop:0.2 rgba(0,0,0,120),
+                stop:1 rgba(0,0,0,240));
+            border-bottom-left-radius: 8px;
+            border-bottom-right-radius: 8px;
+        """)
+        overlay_layout = QVBoxLayout(overlay_widget)
+        overlay_layout.setContentsMargins(10, 10, 10, 10)
+        overlay_layout.setSpacing(4)
+        
+        title_lbl = QLabel(title_text)
+        title_lbl.setObjectName("resultTitle")
+        title_lbl.setStyleSheet("background-color: transparent; color: white; font-size: 13px;")
+        title_lbl.setWordWrap(True)
+        
+        score_lbl = QLabel(f"⭐ {score}/10")
+        score_lbl.setStyleSheet("background-color: transparent; color: #60A5FA; font-size: 12px; font-weight: 700;")
+        
+        overlay_layout.addWidget(title_lbl)
+        overlay_layout.addWidget(score_lbl)
+        
+        # Absolute positioning for overlay - positioned lower with more height
+        overlay_widget.setParent(thumb_frame)
+        overlay_widget.setGeometry(0, 200, 160, 84)
+        
+        # Buttons
+        if not is_placeholder:
+            play_btn = QPushButton("Play Video")
+            save_btn = QPushButton("Save Output")
+            save_btn.setObjectName("primaryBtn")
+            
+            play_btn.clicked.connect(self.play_video)
+            save_btn.clicked.connect(self.save_video)
+            
+            layout.addWidget(thumb_frame)
+            layout.addSpacing(10)
+            layout.addWidget(play_btn)
+            layout.addWidget(save_btn)
+        else:
+            layout.addWidget(thumb_frame)
+    
+    def update_progress(self, percentage, status_text):
+        """Update the progress bar for placeholder cards - only show 'Processing'"""
+        if self.is_placeholder and hasattr(self, 'progress_bar'):
+            self.progress_bar.setValue(percentage)
+            # Always show "Processing" regardless of status_text
+            self.status_label.setText("Processing")
+    
+    def convert_to_final(self, data):
+        """Convert placeholder to final result with thumbnail and buttons"""
+        self.data = data
+        self.is_placeholder = False
+        
+        # Clear existing layout
+        layout = self.layout()
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        # Rebuild with final content
+        thumb_frame = QFrame()
+        thumb_frame.setObjectName("thumbnailFrame")
+        thumb_frame.setFixedSize(160, 284)
+        
+        thumb_layout = QVBoxLayout(thumb_frame)
+        thumb_layout.setContentsMargins(0, 0, 0, 0)
+        
         img_label = QLabel()
         img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        # Load image
         if os.path.exists(data.get('thumb', '')):
             pixmap = QPixmap(data['thumb']).scaled(160, 284, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
             img_label.setPixmap(pixmap)
             
         thumb_layout.addWidget(img_label)
         
-        # Overlay title
-        title_lbl = QLabel(data.get('title', 'Generated Clip'))
+        # Title and score overlay
+        title_text = data.get('title', 'Generated Clip')
+        score = data.get('score', 0)
+        
+        overlay_widget = QWidget()
+        overlay_widget.setStyleSheet("""
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                stop:0 rgba(0,0,0,0), 
+                stop:0.2 rgba(0,0,0,120),
+                stop:1 rgba(0,0,0,240));
+            border-bottom-left-radius: 8px;
+            border-bottom-right-radius: 8px;
+        """)
+        overlay_layout = QVBoxLayout(overlay_widget)
+        overlay_layout.setContentsMargins(10, 10, 10, 10)
+        overlay_layout.setSpacing(4)
+        
+        title_lbl = QLabel(title_text)
         title_lbl.setObjectName("resultTitle")
-        title_lbl.setStyleSheet("background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(0,0,0,0), stop:1 rgba(0,0,0,200)); padding: 8px; border-bottom-left-radius: 4px; border-bottom-right-radius: 4px;")
-        title_lbl.setFixedHeight(40)
+        title_lbl.setStyleSheet("background-color: transparent; color: white; font-size: 13px;")
+        title_lbl.setWordWrap(True)
         
-        # Absolute positioning for overlay
-        title_lbl.setParent(thumb_frame)
-        title_lbl.setGeometry(0, 244, 160, 40)
+        score_lbl = QLabel(f"⭐ {score}/10")
+        score_lbl.setStyleSheet("background-color: transparent; color: #60A5FA; font-size: 12px; font-weight: 700;")
         
-        # Buttons
+        overlay_layout.addWidget(title_lbl)
+        overlay_layout.addWidget(score_lbl)
+        
+        overlay_widget.setParent(thumb_frame)
+        overlay_widget.setGeometry(0, 200, 160, 84)
+        
         play_btn = QPushButton("Play Video")
         save_btn = QPushButton("Save Output")
         save_btn.setObjectName("primaryBtn")
@@ -516,6 +647,9 @@ class MainWindow(QMainWindow):
         
         self.source = ""
         self.is_local = False
+        
+        # Track placeholder cards for progress updates
+        self.placeholder_cards = []
         
         self._init_ui()
 
@@ -906,31 +1040,58 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "API Key Required", "Please configure your Gemini API Key in Settings first.")
             self.open_settings()
             return
-            
-        self.loading_dialog = LoadingDialog(self)
-        self.loading_dialog.show()
         
+        # Show loading dialog until clips are found
+        self.loading_dialog = LoadingDialog(self)
+        self.loading_dialog.update_text("Analyzing content for viral moments...")
+        self.loading_dialog.show()
+            
         self.g_worker = GeneratorWorker(self.source, self.is_local, api_key)
-        self.g_worker.progress.connect(self.loading_dialog.update_text)
+        self.g_worker.progress.connect(lambda msg: print(f"[Worker] {msg}"))
+        self.g_worker.clipsFound.connect(self.on_clips_found)
+        self.g_worker.clipProgress.connect(self.on_clip_progress)
+        self.g_worker.clipComplete.connect(self.on_clip_complete)
         self.g_worker.finished.connect(self.on_generate_finished)
         self.g_worker.error.connect(self.on_generate_error)
         self.g_worker.start()
-
-    def on_generate_finished(self, results):
+    
+    def on_clips_found(self, segments):
+        """Create placeholder cards when clips are identified"""
+        # Close loading dialog and switch to results view
         if self.loading_dialog:
             self.loading_dialog.accept()
-            
-        self.populate_results(results)
+            self.loading_dialog = None
+        
         self.heading_widget.setVisible(False)
         self.main_stack.setCurrentIndex(1)
-
-    def on_generate_error(self, err):
-        if self.loading_dialog:
-            self.loading_dialog.accept()
-        QMessageBox.critical(self, "Generation Error", str(err))
-
-    def populate_results(self, results):
-        # Clear existing
+        
+        self.clear_results_grid()
+        self.placeholder_cards = []
+        
+        for i, seg in enumerate(segments):
+            placeholder_data = {
+                'title': seg.get('title', f'Clip {i+1}'),
+                'thumb': '',
+                'path': '',
+                'score': seg.get('virality_score', 0),
+                'reason': seg.get('reason', '')
+            }
+            card = ResultItem(placeholder_data, self, is_placeholder=True)
+            self.results_grid.addWidget(card)
+            self.placeholder_cards.append(card)
+    
+    def on_clip_progress(self, clip_index, percentage, status_text):
+        """Update progress for a specific clip"""
+        if 0 <= clip_index < len(self.placeholder_cards):
+            self.placeholder_cards[clip_index].update_progress(percentage, status_text)
+    
+    def on_clip_complete(self, clip_index, result_data):
+        """Convert placeholder to final card when clip completes"""
+        if 0 <= clip_index < len(self.placeholder_cards):
+            self.placeholder_cards[clip_index].convert_to_final(result_data)
+    
+    def clear_results_grid(self):
+        """Clear all items from results grid"""
         for i in reversed(range(self.results_grid.count())): 
             item = self.results_grid.itemAt(i)
             if item:
@@ -938,17 +1099,21 @@ class MainWindow(QMainWindow):
                 if w:
                     w.setParent(None)
                     w.deleteLater()
-                
-        if not results:
-            lbl = QLabel("No viral moments found.")
-            self.results_grid.addWidget(lbl)
-            return
+        self.placeholder_cards = []
 
-        for i, res in enumerate(results):
-            item_widget = ResultItem(res, self)
-            self.results_grid.addWidget(item_widget)
+    def on_generate_finished(self, results):
+        # All clips are done - nothing special to do since cards already converted individually
+        pass
+
+    def on_generate_error(self, err):
+        if self.loading_dialog:
+            self.loading_dialog.accept()
+            self.loading_dialog = None
+        QMessageBox.critical(self, "Generation Error", str(err))
+        self.reset_all()
 
     def reset_all(self):
         self.reset_input()
+        self.clear_results_grid()
         self.heading_widget.setVisible(True)
         self.main_stack.setCurrentIndex(0)

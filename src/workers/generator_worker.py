@@ -23,6 +23,9 @@ class GeneratorWorker(QThread):
     progress = pyqtSignal(str)
     finished = pyqtSignal(list)
     error = pyqtSignal(str)
+    clipsFound = pyqtSignal(list)  # Emits list of segment info when analysis completes
+    clipProgress = pyqtSignal(int, int, str)  # (clip_index, percentage, status_text)
+    clipComplete = pyqtSignal(int, dict)  # (clip_index, result_data) when single clip finishes
 
     def __init__(self, source: str, is_local: bool, api_key: str):
         super().__init__()
@@ -85,6 +88,9 @@ class GeneratorWorker(QThread):
             if not viral_segments:
                 raise Exception("No viral moments found during analysis.")
             self.log(f"Found {len(viral_segments)} potential viral segments.")
+            
+            # Emit segments info so UI can create placeholders
+            self.clipsFound.emit(viral_segments)
 
             # 3. Download & Process Clips
             self.log(f"Step 3: Processing clips (Downloading/Cutting)...")
@@ -521,6 +527,9 @@ class GeneratorWorker(QThread):
         self.log(f"Processing Clip {i+1}: {seg.get('title', 'Unknown')}")
         self.log(f"  Range: {timedelta(seconds=start)} - {timedelta(seconds=end)} (Duration: {duration}s)")
         
+        # Emit initial progress
+        self.clipProgress.emit(i, 0, "Starting...")
+        
         # Use StorageManager for file paths
         filename = f"short_{int(time.time())}_{i}.mp4"
         out_path = self.storage.get_new_path(filename)
@@ -534,6 +543,7 @@ class GeneratorWorker(QThread):
         try:
             if self.is_local:
                 self.log(f"  Clip {i+1}: Extracting raw from local...")
+                self.clipProgress.emit(i, 10, "Extracting clip...")
                 cmd = [
                     cmd_exe, '-y',
                     '-ss', str(start),
@@ -545,6 +555,7 @@ class GeneratorWorker(QThread):
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
                 self.log(f"  Clip {i+1}: Downloading raw from YouTube...")
+                self.clipProgress.emit(i, 10, "Downloading clip...")
                 # Download Range
                 if start >= end:
                     return None
@@ -564,10 +575,14 @@ class GeneratorWorker(QThread):
             
             if not os.path.exists(temp_raw_path):
                 self.log(f"  Clip {i+1}: Failed to acquire raw clip.")
+                self.clipProgress.emit(i, 0, "Failed")
                 return None
+            
+            self.clipProgress.emit(i, 25, "Clip downloaded")
 
             # 2. Face Tracking & Cropping
             self.log(f"  Clip {i+1}: Running Face Tracking...")
+            self.clipProgress.emit(i, 30, "Processing frames...")
             
             cap = cv2.VideoCapture(temp_raw_path)
             if not cap.isOpened():
@@ -576,6 +591,7 @@ class GeneratorWorker(QThread):
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = cap.get(cv2.CAP_PROP_FPS)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
             # Validate dimensions
             if width <= 0 or height <= 0 or fps <= 0:
@@ -632,19 +648,26 @@ class GeneratorWorker(QThread):
                 cv2.imwrite(frame_path, cropped, [cv2.IMWRITE_JPEG_QUALITY, 95])
                 
                 frame_count += 1
+                
+                # Update progress every 30 frames (30-70% range for frame processing)
                 if frame_count % 30 == 0:
                     self.log(f"  Clip {i+1}: Processed {frame_count} frames...")
+                    if total_frames > 0:
+                        progress = 30 + int((frame_count / total_frames) * 40)
+                        self.clipProgress.emit(i, progress, f"Frame {frame_count}/{total_frames}")
             
             cap.release()
             tracker.release()
             
             self.log(f"  Clip {i+1}: Processed {frame_count} frames total")
+            self.clipProgress.emit(i, 70, "Frames processed")
             
             if frame_count == 0:
                 raise Exception("No frames were processed")
             
             # 3. Use FFmpeg to create video from frames
             self.log(f"  Clip {i+1}: Creating video from frames with FFmpeg...")
+            self.clipProgress.emit(i, 75, "Encoding video...")
             temp_cropped_video = temp_cropped_path.replace('.mp4', '_video.mp4')
             
             cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
@@ -670,9 +693,12 @@ class GeneratorWorker(QThread):
             
             if not os.path.exists(temp_cropped_video):
                 raise Exception("Failed to create cropped video.")
+            
+            self.clipProgress.emit(i, 85, "Video encoded")
 
             # 4. Merge Audio and Finalize
             self.log(f"  Clip {i+1}: Merging audio and finalizing...")
+            self.clipProgress.emit(i, 90, "Merging audio...")
             cmd_merge = [
                 cmd_exe, '-y',
                 '-i', temp_cropped_video,
@@ -695,6 +721,7 @@ class GeneratorWorker(QThread):
 
             if os.path.exists(out_path):
                 self.log(f"  Clip {i+1}: Generating thumbnail...")
+                self.clipProgress.emit(i, 95, "Creating thumbnail...")
                 cmd_thumb = [
                     cmd_exe, '-y',
                     '-i', out_path,
@@ -705,19 +732,28 @@ class GeneratorWorker(QThread):
                 ]
                 subprocess.run(cmd_thumb, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                return {
+                self.clipProgress.emit(i, 100, "Complete!")
+                
+                result = {
                     'path': out_path,
                     'thumb': thumb_path,
                     'score': seg.get('virality_score', 0),
                     'title': seg.get('title', 'Viral Clip'),
                     'reason': seg.get('reason', '')
                 }
+                
+                # Emit individual clip completion immediately
+                self.clipComplete.emit(i, result)
+                
+                return result
             else:
                  self.log(f"  Clip {i+1}: Output file missing.")
+                 self.clipProgress.emit(i, 0, "Failed")
                  return None
 
         except Exception as e:
             self.log(f"  Clip {i+1} Failed: {e}")
+            self.clipProgress.emit(i, 0, "Failed")
             import traceback
             self.log(traceback.format_exc())
             return None
