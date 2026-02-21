@@ -1254,15 +1254,196 @@ class GeneratorWorker(QThread):
         
         return '\n'.join(result_lines)
     
-    def _burn_subtitles(self, video_path, srt_path, output_path):
-        """Burn SRT subtitles into video with basic styling."""
+    def _convert_srt_to_ass(self, srt_path):
+        """
+        Convert SRT to ASS format with Hormozi-style thick outlines and bold font.
+        Returns path to .ass file or None if failed.
+        """
         try:
+            ass_path = srt_path.replace('.srt', '.ass')
+            
+            # Read SRT content
+            with open(srt_path, 'r', encoding='utf-8') as f:
+                srt_content = f.read()
+            
+            # Parse SRT
+            srt_blocks = self._parse_srt(srt_content)
+            if not srt_blocks:
+                self.log("Failed to parse SRT content")
+                return None
+            
+            # Generate ASS content
+            ass_content = self._generate_ass_content(srt_blocks)
+            
+            # Write ASS file
+            with open(ass_path, 'w', encoding='utf-8') as f:
+                f.write(ass_content)
+            
+            self.log(f"Converted SRT to ASS: {ass_path}")
+            return ass_path
+            
+        except Exception as e:
+            self.log(f"Error converting SRT to ASS: {e}")
+            import traceback
+            self.log(traceback.format_exc())
+            return None
+    
+    def _parse_srt(self, srt_content):
+        """Parse SRT content into structured blocks."""
+        import re
+        
+        blocks = []
+        lines = srt_content.strip().split('\n')
+        
+        i = 0
+        while i < len(lines):
+            # Skip empty lines
+            if not lines[i].strip():
+                i += 1
+                continue
+            
+            # Read sequence number
+            try:
+                seq_num = int(lines[i].strip())
+            except ValueError:
+                i += 1
+                continue
+            
+            i += 1
+            if i >= len(lines):
+                break
+            
+            # Read timestamp
+            timestamp_line = lines[i].strip()
+            if '-->' not in timestamp_line:
+                i += 1
+                continue
+            
+            match = re.match(r'(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})', timestamp_line)
+            if not match:
+                i += 1
+                continue
+            
+            start_time, end_time = match.groups()
+            i += 1
+            
+            # Read text (can be multiple lines)
+            text_lines = []
+            while i < len(lines) and lines[i].strip():
+                text_lines.append(lines[i].strip())
+                i += 1
+            
+            text = ' '.join(text_lines)
+            
+            blocks.append({
+                'seq': seq_num,
+                'start': start_time,
+                'end': end_time,
+                'text': text
+            })
+        
+        return blocks
+    
+    def _generate_ass_content(self, srt_blocks):
+        """Generate ASS file content with Hormozi-style formatting."""
+        
+        # ASS Header with Hormozi-style settings
+        ass_header = """[Script Info]
+Title: Generated Subtitles
+ScriptType: v4.00+
+WrapStyle: 0
+PlayResX: 1080
+PlayResY: 1920
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial Black,70,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,0,2,50,50,80,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+        
+        # Convert SRT blocks to ASS dialogue lines
+        dialogue_lines = []
+        for block in srt_blocks:
+            start_ass = self._srt_time_to_ass_time(block['start'])
+            end_ass = self._srt_time_to_ass_time(block['end'])
+            text = block['text'].replace('\n', '\\N')
+            
+            dialogue_line = f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,{text}"
+            dialogue_lines.append(dialogue_line)
+        
+        return ass_header + '\n'.join(dialogue_lines)
+    
+    def _srt_time_to_ass_time(self, srt_time):
+        """Convert SRT timestamp (HH:MM:SS,mmm) to ASS timestamp (H:MM:SS.cc)."""
+        # SRT: 00:00:01,500
+        # ASS: 0:00:01.50
+        parts = srt_time.replace(',', '.').split(':')
+        h = int(parts[0])
+        m = parts[1]
+        s_ms = parts[2].split('.')
+        s = s_ms[0]
+        ms = s_ms[1] if len(s_ms) > 1 else '000'
+        cs = ms[:2]  # centiseconds (first 2 digits of milliseconds)
+        
+        return f"{h}:{m}:{s}.{cs}"
+    
+    def _burn_subtitles(self, video_path, srt_path, output_path):
+        """Convert SRT to ASS and burn ASS subtitles into video with Hormozi-style thick outlines."""
+        try:
+            # Convert SRT to ASS
+            self.log(f"  Converting SRT to ASS format...")
+            ass_path = self._convert_srt_to_ass(srt_path)
+            
+            if not ass_path or not os.path.exists(ass_path):
+                self.log(f"  Failed to convert to ASS, falling back to SRT")
+                return self._burn_srt_fallback(video_path, srt_path, output_path)
+            
             cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
             
             # Escape path for FFmpeg filter (Windows paths need special handling)
+            ass_path_escaped = ass_path.replace('\\', '/').replace(':', '\\:')
+            
+            # Use ASS filter for advanced styling
+            subtitle_filter = f"ass='{ass_path_escaped}'"
+            
+            cmd = [
+                cmd_exe, '-y',
+                '-i', video_path,
+                '-vf', subtitle_filter,
+                '-c:a', 'copy',
+                output_path
+            ]
+            
+            self.log(f"  Burning ASS subtitles with FFmpeg...")
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            
+            if result.returncode != 0:
+                self.log(f"  FFmpeg ASS subtitle error: {result.stderr}")
+                self.log(f"  Falling back to SRT...")
+                return self._burn_srt_fallback(video_path, srt_path, output_path)
+            
+            # Cleanup ASS file
+            if os.path.exists(ass_path):
+                os.remove(ass_path)
+            
+            return os.path.exists(output_path)
+            
+        except Exception as e:
+            self.log(f"Error burning ASS subtitles: {e}")
+            return self._burn_srt_fallback(video_path, srt_path, output_path)
+    
+    def _burn_srt_fallback(self, video_path, srt_path, output_path):
+        """Fallback to basic SRT burning if ASS fails."""
+        try:
+            cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
+            
+            # Escape path for FFmpeg filter
             srt_path_escaped = srt_path.replace('\\', '/').replace(':', '\\:')
             
-            # Basic subtitle styling: white text, black outline, centered, bottom position
+            # Basic subtitle styling
             subtitle_filter = (
                 f"subtitles='{srt_path_escaped}':force_style='"
                 "FontName=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,"
@@ -1278,15 +1459,15 @@ class GeneratorWorker(QThread):
                 output_path
             ]
             
-            self.log(f"  Burning subtitles with FFmpeg...")
+            self.log(f"  Burning SRT subtitles with FFmpeg (fallback)...")
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             
             if result.returncode != 0:
-                self.log(f"  FFmpeg subtitle error: {result.stderr}")
+                self.log(f"  FFmpeg SRT subtitle error: {result.stderr}")
                 return False
             
             return os.path.exists(output_path)
             
         except Exception as e:
-            self.log(f"Error burning subtitles: {e}")
+            self.log(f"Error burning SRT subtitles (fallback): {e}")
             return False
