@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QSettings, QSize, QTimer
 from PyQt6.QtGui import QPixmap, QImage, QColor, QFont, QIcon, QPainter, QBrush, QPen
 
-from src.workers.preview_worker import PreviewWorker
+from src.workers.preview_worker import PreviewWorker, YOUTUBE_REGEX
 from src.workers.generator_worker import GeneratorWorker
 from src.ui.flow_layout import FlowLayout
 
@@ -98,6 +98,13 @@ QFrame#innerGroup, QFrame#resultItem {
         stop:1 #1A1A1A);
     border: 1px solid #2A2A2A;
     border-radius: 10px;
+}
+
+QFrame#resultItem:hover {
+    border: 1px solid #3B82F6;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+        stop:0 #252525, 
+        stop:1 #1D1D1D);
 }
 
 QLineEdit, QComboBox {
@@ -252,7 +259,9 @@ QProgressBar {
     border-radius: 8px;
     height: 20px;
     text-align: right;
-    color: transparent;
+    color: #F0F0F0;
+    font-weight: 600;
+    font-size: 12px;
 }
 QProgressBar::chunk {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
@@ -281,6 +290,10 @@ QScrollBar::handle:vertical:hover {
     background: #3A3A3A;
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+QScrollBar:horizontal {
     height: 0px;
 }
 
@@ -703,6 +716,7 @@ class MainWindow(QMainWindow):
         # Content Area - scrollable stack
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
         scroll_layout.setContentsMargins(40, 24, 40, 24)
@@ -785,8 +799,7 @@ class MainWindow(QMainWindow):
         u_layout.setContentsMargins(20, 20, 20, 20)
         u_layout.setSpacing(12)
         
-        u_lbl = QLabel("<span style='color: #2563EB; font-family: Segoe UI Symbol, Arial;'>&#128279;</span> URL Source")
-        u_lbl.setTextFormat(Qt.TextFormat.RichText)
+        u_lbl = QLabel("🔗 URL Source")
         u_lbl.setObjectName("labelText")
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText("https://youtube.com/...")
@@ -808,8 +821,7 @@ class MainWindow(QMainWindow):
         f_layout.setContentsMargins(20, 20, 20, 20)
         f_layout.setSpacing(12)
         
-        f_lbl = QLabel("<span style='color: #2563EB; font-family: Segoe UI Symbol, Arial;'>&#128193;</span> Local File")
-        f_lbl.setTextFormat(Qt.TextFormat.RichText)
+        f_lbl = QLabel("📁 Local File")
         f_lbl.setObjectName("labelText")
         
         browse_btn = QPushButton("⬆ Browse Files...")
@@ -973,8 +985,7 @@ class MainWindow(QMainWindow):
         res_layout.setSpacing(16)
         
         res_header = QHBoxLayout()
-        res_title = QLabel("<span style='color: #2563EB;'>▶</span> Output Gallery")
-        res_title.setTextFormat(Qt.TextFormat.RichText)
+        res_title = QLabel("▶ Output Gallery")
         res_title.setObjectName("cardTitle")
         
         restart_btn = QPushButton("↻ Start Over")
@@ -990,6 +1001,13 @@ class MainWindow(QMainWindow):
         sep3.setFixedHeight(1)
         sep3.setStyleSheet("background-color: #333333;")
         res_layout.addWidget(sep3)
+        
+        # Empty state message
+        self.empty_state = QLabel("No clips generated yet")
+        self.empty_state.setObjectName("mutedText")
+        self.empty_state.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_state.setStyleSheet("font-size: 14px; padding: 40px; color: #6B7280;")
+        res_layout.addWidget(self.empty_state)
         
         # Grid for Outputs
         self.results_grid_widget = QWidget()
@@ -1008,8 +1026,20 @@ class MainWindow(QMainWindow):
 
     def on_url_changed(self, text):
         if "http" in text:
-            # Short delay to allow user to paste fully
-            QTimer.singleShot(300, lambda: self.start_preview(self.url_input.text().strip(), False))
+            # Validate YouTube URL before preview
+            if not YOUTUBE_REGEX.match(text.strip()):
+                return
+            # Short delay to allow user to paste fully - check widget still exists
+            QTimer.singleShot(300, lambda: self._safe_start_preview(text.strip(), False))
+    
+    def _safe_start_preview(self, source, is_local):
+        """Safe wrapper to prevent crashes if widget destroyed"""
+        try:
+            if self.isVisible() and source:
+                self.start_preview(source, is_local)
+        except RuntimeError:
+            # Widget was destroyed, ignore
+            pass
 
     def browse_files(self):
         fname, _ = QFileDialog.getOpenFileName(self, 'Open file', '', "Video files (*.mp4 *.mkv *.avi *.mov)")
@@ -1094,6 +1124,9 @@ class MainWindow(QMainWindow):
         self.clear_results_grid()
         self.placeholder_cards = []
         
+        # Hide empty state when adding clips
+        self.empty_state.setVisible(False)
+        
         for i, seg in enumerate(segments):
             placeholder_data = {
                 'title': seg.get('title', f'Clip {i+1}'),
@@ -1126,6 +1159,9 @@ class MainWindow(QMainWindow):
                     w.setParent(None)
                     w.deleteLater()
         self.placeholder_cards = []
+        
+        # Show empty state when grid is cleared
+        self.empty_state.setVisible(self.results_grid.count() == 0)
 
     def on_generate_finished(self, results):
         # All clips are done - nothing special to do since cards already converted individually
