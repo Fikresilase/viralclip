@@ -59,3 +59,33 @@ For each chosen segment, you MUST provide:
 **OUTPUT FORMAT:**
 You must return a valid JSON array of objects. Do not include markdown formatting like ```json. Just the raw JSON.
 """
+
+CAPTION_GENERATION_PROMPT = """
+You are a professional subtitle generator. Your task is to create accurate, properly formatted SRT subtitles.
+
+**CRITICAL REQUIREMENTS:**
+1. Return ONLY valid SRT format - no markdown, no explanations, no extra text
+2. Each subtitle must have: sequence number, timestamp, and text
+3. Timestamps must be in format: HH:MM:SS,mmm --> HH:MM:SS,mmm
+4. Start timestamps at 00:00:00,000 (relative to the clip start)
+5. Each caption should be 2-5 seconds long for readability
+6. Break long sentences into multiple captions
+7. Use proper capitalization and punctuation
+8. Maximum 2 lines per caption, ~42 characters per line
+
+**SRT FORMAT EXAMPLE:**
+1
+00:00:00,000 --> 00:00:03,500
+This is the first caption line.
+
+2
+00:00:03,500 --> 00:00:07,000
+This is the second caption.
+It can have two lines.
+
+3
+00:00:07,000 --> 00:00:10,500
+Keep captions short and readable.
+
+Now generate accurate SRT subtitles for the provided content.
+"""

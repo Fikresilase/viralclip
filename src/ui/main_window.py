@@ -1097,12 +1097,15 @@ class MainWindow(QMainWindow):
             self.open_settings()
             return
         
+        # Get caption setting
+        enable_captions = self.auto_caption_toggle.isChecked()
+        
         # Show loading dialog until clips are found
         self.loading_dialog = LoadingDialog(self)
         self.loading_dialog.update_text("Analyzing content for viral moments...")
         self.loading_dialog.show()
             
-        self.g_worker = GeneratorWorker(self.source, self.is_local, api_key)
+        self.g_worker = GeneratorWorker(self.source, self.is_local, api_key, enable_captions)
         self.g_worker.progress.connect(lambda msg: print(f"[Worker] {msg}"))
         self.g_worker.clipsFound.connect(self.on_clips_found)
         self.g_worker.clipProgress.connect(self.on_clip_progress)
@@ -1150,7 +1153,21 @@ class MainWindow(QMainWindow):
             self.placeholder_cards[clip_index].convert_to_final(result_data)
     
     def clear_results_grid(self):
-        """Clear all items from results grid"""
+        """Clear all items from results grid and delete associated files"""
+        # Collect file paths before clearing widgets
+        files_to_delete = []
+        for i in range(self.results_grid.count()):
+            item = self.results_grid.itemAt(i)
+            if item:
+                w = item.widget()
+                if w and hasattr(w, 'data'):
+                    # Collect video and thumbnail paths
+                    if 'path' in w.data and w.data['path']:
+                        files_to_delete.append(w.data['path'])
+                    if 'thumb' in w.data and w.data['thumb']:
+                        files_to_delete.append(w.data['thumb'])
+        
+        # Clear UI widgets
         for i in reversed(range(self.results_grid.count())): 
             item = self.results_grid.itemAt(i)
             if item:
@@ -1159,6 +1176,16 @@ class MainWindow(QMainWindow):
                     w.setParent(None)
                     w.deleteLater()
         self.placeholder_cards = []
+        
+        # Delete files from disk
+        import os
+        for filepath in files_to_delete:
+            try:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                    print(f"[UI] Deleted: {filepath}")
+            except Exception as e:
+                print(f"[UI] Failed to delete {filepath}: {e}")
         
         # Show empty state when grid is cleared
         self.empty_state.setVisible(self.results_grid.count() == 0)

@@ -1,4 +1,3 @@
-
 import os
 import json
 import re
@@ -7,6 +6,7 @@ import subprocess
 import shutil
 from datetime import timedelta
 import concurrent.futures
+import threading
 import base64
 
 import cv2
@@ -15,7 +15,7 @@ from google.genai import types
 from PyQt6.QtCore import QThread, pyqtSignal
 import yt_dlp
 
-from src.prompts import VIRAL_MOMENTS_PROMPT, VISUAL_MOMENTS_PROMPT
+from src.prompts import VIRAL_MOMENTS_PROMPT, VISUAL_MOMENTS_PROMPT, CAPTION_GENERATION_PROMPT
 from src.core.face_tracker import FaceTracker
 from src.utils.storage import StorageManager
 
@@ -27,11 +27,18 @@ class GeneratorWorker(QThread):
     clipProgress = pyqtSignal(int, int, str)  # (clip_index, percentage, status_text)
     clipComplete = pyqtSignal(int, dict)  # (clip_index, result_data) when single clip finishes
 
-    def __init__(self, source: str, is_local: bool, api_key: str):
+    def __init__(self, source: str, is_local: bool, api_key: str, enable_captions: bool = True):
         super().__init__()
         self.source = source
         self.is_local = is_local
         self.api_key = api_key
+        self.enable_captions = enable_captions
+        
+        # Semaphore for limiting concurrent Gemini API calls
+        self.caption_semaphore = threading.Semaphore(5)
+        
+        # Dictionary to store caption results {clip_index: srt_path}
+        self.caption_results = {}
         
         # Use StorageManager for output directory
         self.storage = StorageManager()
@@ -80,6 +87,10 @@ class GeneratorWorker(QThread):
             self.log("Step 1: Extracting Context (Subtitles or Audio)...")
             context_type, context_path = self._get_context()
             self.log(f"Context acquired: Type={context_type}, Path={context_path}")
+            
+            # Store context info for caption generation
+            self.context_type = context_type
+            self.context_path = context_path
 
             # 2. Analyze
             self.log("Step 2: Analyzing content for viral moments...")
@@ -92,17 +103,23 @@ class GeneratorWorker(QThread):
             # Emit segments info so UI can create placeholders
             self.clipsFound.emit(viral_segments)
 
-            # 3. Download & Process Clips
-            self.log(f"Step 3: Processing clips (Downloading/Cutting)...")
+            # 3. Process Clips (video processing + parallel caption generation)
+            self.log(f"Step 3: Processing clips with parallel caption generation...")
             results = self._process_clips(viral_segments)
             
             self.log(f"Generation finished. Emitting {len(results)} results.")
             self.finished.emit(results)
+            
+            # Cleanup temp files after successful generation
+            self.log("Cleaning up temporary files...")
+            self._cleanup_temp_files()
 
         except Exception as e:
             self.log(f"CRITICAL ERROR: {str(e)}")
             import traceback
             self.log(traceback.format_exc())
+            # Cleanup on error too
+            self._cleanup_temp_files()
             self.error.emit(str(e))
 
     def _get_context(self):
@@ -499,11 +516,11 @@ class GeneratorWorker(QThread):
     def _process_clips(self, segments):
         processed = []
         
-        # Reduce parallelism to avoid OpenCV thread conflicts
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-            # Submit all tasks
+        # Process videos with integrated caption generation (max 2 workers to avoid OpenCV conflicts)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as video_executor:
+            # Submit all video processing tasks
             future_to_seg = {
-                executor.submit(self._process_single_clip, i, seg): seg 
+                video_executor.submit(self._process_single_clip, i, seg): seg 
                 for i, seg in enumerate(segments)
             }
             
@@ -579,6 +596,20 @@ class GeneratorWorker(QThread):
                 return None
             
             self.clipProgress.emit(i, 25, "Clip downloaded")
+            
+            # Start caption generation in parallel (using downloaded clip)
+            caption_future = None
+            if self.enable_captions:
+                with self.caption_semaphore:
+                    self.log(f"  Clip {i+1}: Starting caption generation in background...")
+                    caption_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                    caption_future = caption_executor.submit(
+                        self._generate_captions_from_clip,
+                        i,
+                        temp_raw_path,
+                        start,
+                        end
+                    )
 
             # 2. Face Tracking & Cropping
             self.log(f"  Clip {i+1}: Running Face Tracking...")
@@ -618,11 +649,21 @@ class GeneratorWorker(QThread):
             
             tracker = FaceTracker()
             frame_count = 0
+            processed_frame_count = 0
+            target_fps = 30  # Target 30fps for output
+            frame_skip = max(1, int(fps / target_fps))  # Skip frames to achieve 30fps
+            
+            self.log(f"  Clip {i+1}: Source FPS: {fps}, Target FPS: {target_fps}, Frame skip: {frame_skip}")
             
             while True:
                 ret, frame = cap.read()
                 if not ret:
                     break
+                
+                # Skip frames to downsample to 30fps
+                if frame_count % frame_skip != 0:
+                    frame_count += 1
+                    continue
                 
                 # Apply face tracking and cropping
                 try:
@@ -643,36 +684,38 @@ class GeneratorWorker(QThread):
                     cropped = cv2.resize(cropped, (target_w, target_h))
                 
                 # Save frame as image
-                frame_path = os.path.join(frames_dir, f"frame_{frame_count:06d}.jpg")
+                frame_path = os.path.join(frames_dir, f"frame_{processed_frame_count:06d}.jpg")
                 cv2.imwrite(frame_path, cropped, [cv2.IMWRITE_JPEG_QUALITY, 95])
                 
                 frame_count += 1
+                processed_frame_count += 1
                 
-                # Update progress every 30 frames (30-70% range for frame processing)
-                if frame_count % 30 == 0:
-                    self.log(f"  Clip {i+1}: Processed {frame_count} frames...")
-                    if total_frames > 0:
-                        progress = 30 + int((frame_count / total_frames) * 40)
-                        self.clipProgress.emit(i, progress, f"Frame {frame_count}/{total_frames}")
+                # Update progress every 30 processed frames (30-70% range for frame processing)
+                if processed_frame_count % 30 == 0:
+                    self.log(f"  Clip {i+1}: Processed {processed_frame_count} frames...")
+                    expected_frames = int(total_frames / frame_skip)
+                    if expected_frames > 0:
+                        progress = 30 + int((processed_frame_count / expected_frames) * 40)
+                        self.clipProgress.emit(i, progress, f"Frame {processed_frame_count}/{expected_frames}")
             
             cap.release()
             tracker.release()
             
-            self.log(f"  Clip {i+1}: Processed {frame_count} frames total")
+            self.log(f"  Clip {i+1}: Processed {processed_frame_count} frames total (downsampled from {frame_count})")
             self.clipProgress.emit(i, 70, "Frames processed")
             
-            if frame_count == 0:
+            if processed_frame_count == 0:
                 raise Exception("No frames were processed")
             
-            # 3. Use FFmpeg to create video from frames
-            self.log(f"  Clip {i+1}: Creating video from frames with FFmpeg...")
+            # 3. Use FFmpeg to create video from frames at 30fps
+            self.log(f"  Clip {i+1}: Creating video from frames with FFmpeg at {target_fps}fps...")
             self.clipProgress.emit(i, 75, "Encoding video...")
             temp_cropped_video = temp_cropped_path.replace('.mp4', '_video.mp4')
             
             cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
             cmd_frames = [
                 cmd_exe, '-y',
-                '-framerate', str(fps),
+                '-framerate', str(target_fps),  # Use target 30fps
                 '-i', os.path.join(frames_dir, 'frame_%06d.jpg'),
                 '-c:v', 'libx264',
                 '-pix_fmt', 'yuv420p',
@@ -698,6 +741,9 @@ class GeneratorWorker(QThread):
             # 4. Merge Audio and Finalize
             self.log(f"  Clip {i+1}: Merging audio and finalizing...")
             self.clipProgress.emit(i, 90, "Merging audio...")
+            
+            temp_final_no_subs = self.storage.get_new_path(f"temp_final_no_subs_{i}.mp4")
+            
             cmd_merge = [
                 cmd_exe, '-y',
                 '-i', temp_cropped_video,
@@ -707,9 +753,54 @@ class GeneratorWorker(QThread):
                 '-map', '0:v:0', '-map', '1:a:0',
                 '-shortest',
                 '-movflags', '+faststart',  # Optimize for web streaming
-                out_path
+                temp_final_no_subs
             ]
             subprocess.run(cmd_merge, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            if not os.path.exists(temp_final_no_subs):
+                raise Exception("Failed to merge audio and video.")
+            
+            # 5. Wait for and burn captions (if enabled)
+            if self.enable_captions and caption_future:
+                self.log(f"  Clip {i+1}: Waiting for captions to be ready...")
+                self.clipProgress.emit(i, 92, "Waiting for captions...")
+                
+                try:
+                    # Wait for caption generation to complete (with timeout)
+                    srt_path = caption_future.result(timeout=60)
+                    caption_executor.shutdown(wait=False)
+                    
+                    if srt_path and os.path.exists(srt_path):
+                        self.log(f"  Clip {i+1}: Burning captions...")
+                        self.clipProgress.emit(i, 94, "Burning captions...")
+                        
+                        if self._burn_subtitles(temp_final_no_subs, srt_path, out_path):
+                            self.log(f"  Clip {i+1}: Captions burned successfully")
+                            # Cleanup temp file
+                            if os.path.exists(temp_final_no_subs):
+                                os.remove(temp_final_no_subs)
+                        else:
+                            self.log(f"  Clip {i+1}: Failed to burn captions, using video without captions")
+                            if os.path.exists(temp_final_no_subs):
+                                shutil.move(temp_final_no_subs, out_path)
+                    else:
+                        self.log(f"  Clip {i+1}: No captions generated, using video without captions")
+                        if os.path.exists(temp_final_no_subs):
+                            shutil.move(temp_final_no_subs, out_path)
+                except concurrent.futures.TimeoutError:
+                    self.log(f"  Clip {i+1}: Caption generation timed out, using video without captions")
+                    if os.path.exists(temp_final_no_subs):
+                        shutil.move(temp_final_no_subs, out_path)
+                except Exception as e:
+                    self.log(f"  Clip {i+1}: Caption error: {e}, using video without captions")
+                    if os.path.exists(temp_final_no_subs):
+                        shutil.move(temp_final_no_subs, out_path)
+            else:
+                # Captions disabled or no future, just rename temp file to final
+                if not self.enable_captions:
+                    self.log(f"  Clip {i+1}: Captions disabled")
+                if os.path.exists(temp_final_no_subs):
+                    shutil.move(temp_final_no_subs, out_path)
             
             # Cleanup Temps
             if os.path.exists(temp_raw_path):
@@ -790,3 +881,412 @@ class GeneratorWorker(QThread):
                     break
         self.log(f"Retained {len(final_moments)} unique moments.")
         return final_moments
+    
+    def _cleanup_temp_files(self):
+        """
+        Clean up all temporary files except final outputs.
+        Keeps only the generated videos and thumbnails.
+        """
+        try:
+            self.log("Starting temp file cleanup...")
+            
+            # Get list of all files in temp directory
+            if not os.path.exists(self.output_dir):
+                return
+            
+            files_to_keep = set()
+            
+            # Collect final output files to keep (videos and thumbnails)
+            for filename in os.listdir(self.output_dir):
+                filepath = os.path.join(self.output_dir, filename)
+                # Keep files that start with 'short_' or 'thumb_' (final outputs)
+                if filename.startswith('short_') or filename.startswith('thumb_'):
+                    files_to_keep.add(filepath)
+            
+            # Delete everything else
+            deleted_count = 0
+            for filename in os.listdir(self.output_dir):
+                filepath = os.path.join(self.output_dir, filename)
+                
+                if filepath not in files_to_keep:
+                    try:
+                        if os.path.isfile(filepath):
+                            os.remove(filepath)
+                            deleted_count += 1
+                        elif os.path.isdir(filepath):
+                            shutil.rmtree(filepath)
+                            deleted_count += 1
+                    except Exception as e:
+                        self.log(f"Failed to delete {filename}: {e}")
+            
+            self.log(f"Cleanup complete: Removed {deleted_count} temporary files/folders")
+            
+        except Exception as e:
+            self.log(f"Cleanup error: {e}")
+    
+    def _generate_captions_from_clip(self, clip_index, clip_video_path, start_time, end_time):
+        """
+        Generate captions from the downloaded clip (not the full video).
+        Extracts audio from the clip and sends to Gemini.
+        Returns path to .srt file or None if failed.
+        """
+        try:
+            self.log(f"  [Caption] Clip {clip_index+1}: Extracting audio from downloaded clip...")
+            
+            # Extract audio from the downloaded clip
+            audio_path = self.storage.get_new_path(f"clip_audio_{clip_index}.mp3")
+            
+            cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
+            cmd = [
+                cmd_exe, '-y',
+                '-i', clip_video_path,
+                '-vn',  # No video
+                '-acodec', 'libmp3lame',
+                '-q:a', '2',
+                audio_path
+            ]
+            
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            if not os.path.exists(audio_path) or os.path.getsize(audio_path) < 1024:
+                self.log(f"  [Caption] Clip {clip_index+1}: Failed to extract audio")
+                return None
+            
+            self.log(f"  [Caption] Clip {clip_index+1}: Sending audio to Gemini for transcription...")
+            
+            # Send audio to Gemini for transcription
+            with open(audio_path, 'rb') as f:
+                audio_bytes = f.read()
+            
+            content_parts = [
+                types.Part(text=CAPTION_GENERATION_PROMPT),
+                types.Part(
+                    inline_data=types.Blob(
+                        mime_type="audio/mpeg",
+                        data=audio_bytes,
+                    )
+                )
+            ]
+            
+            response = self.client.models.generate_content(
+                model='gemini-3-flash-preview',
+                contents=[types.Content(parts=content_parts)]
+            )
+            srt_content = response.text.strip()
+            
+            self.log(f"  [Caption] Clip {clip_index+1}: Gemini returned captions (length: {len(srt_content)} chars)")
+            self.log(f"  [Caption] Clip {clip_index+1}: Caption preview:\n{srt_content[:500]}...")
+            
+            # Cleanup temp audio
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
+            
+            # Clean up response (remove markdown if present)
+            if "```srt" in srt_content:
+                srt_content = srt_content.split("```srt")[1].split("```")[0].strip()
+            elif "```" in srt_content:
+                srt_content = srt_content.split("```")[1].split("```")[0].strip()
+            
+            # Validate SRT format
+            if not self._validate_srt(srt_content):
+                self.log(f"  [Caption] Clip {clip_index+1}: Invalid SRT format received from Gemini")
+                return None
+            
+            # NO OFFSET NEEDED - clip already starts at 00:00:00
+            self.log(f"  [Caption] Clip {clip_index+1}: No timestamp offset needed (clip-based)")
+            
+            # Save SRT file
+            srt_path = self.storage.get_new_path(f"captions_{clip_index}.srt")
+            with open(srt_path, 'w', encoding='utf-8') as f:
+                f.write(srt_content)
+            
+            self.log(f"  [Caption] Clip {clip_index+1}: Captions saved to {srt_path}")
+            return srt_path
+            
+        except Exception as e:
+            self.log(f"  [Caption] Clip {clip_index+1}: Caption generation failed: {e}")
+            import traceback
+            self.log(traceback.format_exc())
+            return None
+
+    def _generate_captions_for_clip(self, clip_index, start_time, end_time, context_type, context_path):
+        """
+        Generate SRT captions for a specific clip segment.
+        Returns path to .srt file or None if failed.
+        """
+        try:
+            self.log(f"  Clip {clip_index+1}: Generating captions...")
+            
+            if context_type == 'text':
+                # Extract VTT segment for this time range
+                caption_content = self._extract_vtt_segment(context_path, start_time, end_time)
+                if not caption_content:
+                    self.log(f"  Clip {clip_index+1}: No VTT content found for time range")
+                    return None
+                
+                # Send to Gemini for SRT conversion
+                prompt = CAPTION_GENERATION_PROMPT + f"\n\nVTT CONTENT:\n{caption_content}"
+                response = self.client.models.generate_content(
+                    model='gemini-3-flash-preview',
+                    contents=prompt
+                )
+                srt_content = response.text.strip()
+                self.log(f"  Clip {clip_index+1}: Gemini returned captions (length: {len(srt_content)} chars)")
+                self.log(f"  Clip {clip_index+1}: Caption preview:\n{srt_content[:500]}...")
+                
+            elif context_type == 'audio':
+                # Extract audio segment for this time range
+                audio_segment_path = self._extract_audio_segment(context_path, start_time, end_time, clip_index)
+                if not audio_segment_path or not os.path.exists(audio_segment_path):
+                    self.log(f"  Clip {clip_index+1}: Failed to extract audio segment")
+                    return None
+                
+                # Send audio to Gemini for transcription
+                with open(audio_segment_path, 'rb') as f:
+                    audio_bytes = f.read()
+                
+                content_parts = [
+                    types.Part(text=CAPTION_GENERATION_PROMPT),
+                    types.Part(
+                        inline_data=types.Blob(
+                            mime_type="audio/mpeg",
+                            data=audio_bytes,
+                        )
+                    )
+                ]
+                
+                response = self.client.models.generate_content(
+                    model='gemini-3-flash-preview',
+                    contents=[types.Content(parts=content_parts)]
+                )
+                srt_content = response.text.strip()
+                self.log(f"  Clip {clip_index+1}: Gemini returned captions (length: {len(srt_content)} chars)")
+                self.log(f"  Clip {clip_index+1}: Caption preview:\n{srt_content[:500]}...")
+                
+                # Cleanup temp audio
+                if os.path.exists(audio_segment_path):
+                    os.remove(audio_segment_path)
+            
+            elif context_type == 'visuals':
+                # No captions for visual-only analysis
+                self.log(f"  Clip {clip_index+1}: Skipping captions (visual-only source)")
+                return None
+            else:
+                return None
+            
+            # Clean up response (remove markdown if present)
+            if "```srt" in srt_content:
+                srt_content = srt_content.split("```srt")[1].split("```")[0].strip()
+            elif "```" in srt_content:
+                srt_content = srt_content.split("```")[1].split("```")[0].strip()
+            
+            # Validate SRT format
+            if not self._validate_srt(srt_content):
+                self.log(f"  Clip {clip_index+1}: Invalid SRT format received from Gemini")
+                return None
+            
+            # CRITICAL: Offset timestamps to be relative to 00:00:00
+            self.log(f"  Clip {clip_index+1}: Offsetting timestamps by -{start_time}s")
+            srt_content = self._offset_srt_timestamps(srt_content, start_time)
+            
+            # Save SRT file
+            srt_path = self.storage.get_new_path(f"captions_{clip_index}.srt")
+            with open(srt_path, 'w', encoding='utf-8') as f:
+                f.write(srt_content)
+            
+            self.log(f"  Clip {clip_index+1}: Captions saved to {srt_path}")
+            return srt_path
+            
+        except Exception as e:
+            self.log(f"  Clip {clip_index+1}: Caption generation failed: {e}")
+            import traceback
+            self.log(traceback.format_exc())
+            return None
+    
+    def _extract_vtt_segment(self, vtt_path, start_time, end_time):
+        """Extract VTT content for a specific time range."""
+        try:
+            with open(vtt_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Simple extraction - get all content between start and end times
+            # VTT format: HH:MM:SS.mmm --> HH:MM:SS.mmm
+            lines = content.split('\n')
+            segment_lines = []
+            in_range = False
+            
+            for line in lines:
+                # Check if line contains timestamp
+                if '-->' in line:
+                    # Parse timestamp
+                    try:
+                        time_parts = line.split('-->')[0].strip()
+                        # Convert to seconds for comparison
+                        time_sec = self._vtt_time_to_seconds(time_parts)
+                        
+                        if start_time <= time_sec <= end_time:
+                            in_range = True
+                            segment_lines.append(line)
+                        elif time_sec > end_time:
+                            in_range = False
+                            break
+                    except:
+                        continue
+                elif in_range and line.strip():
+                    segment_lines.append(line)
+            
+            return '\n'.join(segment_lines)
+            
+        except Exception as e:
+            self.log(f"Error extracting VTT segment: {e}")
+            return ""
+    
+    def _vtt_time_to_seconds(self, time_str):
+        """Convert VTT timestamp to seconds."""
+        # Format: HH:MM:SS.mmm or MM:SS.mmm
+        parts = time_str.strip().replace(',', '.').split(':')
+        if len(parts) == 3:
+            h, m, s = parts
+            return int(h) * 3600 + int(m) * 60 + float(s)
+        elif len(parts) == 2:
+            m, s = parts
+            return int(m) * 60 + float(s)
+        return 0
+    
+    def _extract_audio_segment(self, audio_path, start_time, end_time, clip_index):
+        """Extract audio segment for a specific time range."""
+        try:
+            duration = end_time - start_time
+            segment_path = self.storage.get_new_path(f"audio_segment_{clip_index}.mp3")
+            
+            cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
+            cmd = [
+                cmd_exe, '-y',
+                '-i', audio_path,
+                '-ss', str(start_time),
+                '-t', str(duration),
+                '-c', 'copy',
+                segment_path
+            ]
+            
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            if os.path.exists(segment_path) and os.path.getsize(segment_path) > 1024:
+                return segment_path
+            return None
+            
+        except Exception as e:
+            self.log(f"Error extracting audio segment: {e}")
+            return None
+    
+    def _validate_srt(self, srt_content):
+        """Basic validation of SRT format."""
+        if not srt_content or len(srt_content) < 10:
+            return False
+        
+        # Check for basic SRT structure
+        lines = srt_content.strip().split('\n')
+        
+        # Should have at least: number, timestamp, text, blank line
+        if len(lines) < 4:
+            return False
+        
+        # Check if first line is a number
+        try:
+            int(lines[0].strip())
+        except:
+            return False
+        
+        # Check if second line has timestamp arrow
+        if '-->' not in lines[1]:
+            return False
+        
+        return True
+    
+    def _offset_srt_timestamps(self, srt_content, offset_seconds):
+        """
+        Offset all SRT timestamps by subtracting offset_seconds.
+        This makes timestamps relative to 00:00:00 for extracted clips.
+        """
+        import re
+        
+        def srt_time_to_seconds(time_str):
+            """Convert SRT timestamp (HH:MM:SS,mmm) to seconds."""
+            time_str = time_str.strip()
+            h, m, rest = time_str.split(':')
+            s, ms = rest.split(',')
+            return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000.0
+        
+        def seconds_to_srt_time(seconds):
+            """Convert seconds to SRT timestamp (HH:MM:SS,mmm)."""
+            if seconds < 0:
+                seconds = 0
+            h = int(seconds // 3600)
+            m = int((seconds % 3600) // 60)
+            s = int(seconds % 60)
+            ms = int((seconds % 1) * 1000)
+            return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+        
+        lines = srt_content.split('\n')
+        result_lines = []
+        
+        for line in lines:
+            if '-->' in line:
+                # Parse timestamp line
+                match = re.match(r'(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})', line)
+                if match:
+                    start_str, end_str = match.groups()
+                    
+                    # Convert to seconds, subtract offset, convert back
+                    start_sec = srt_time_to_seconds(start_str) - offset_seconds
+                    end_sec = srt_time_to_seconds(end_str) - offset_seconds
+                    
+                    # Skip captions that would be before 00:00:00
+                    if end_sec <= 0:
+                        continue
+                    
+                    new_line = f"{seconds_to_srt_time(start_sec)} --> {seconds_to_srt_time(end_sec)}"
+                    result_lines.append(new_line)
+                else:
+                    result_lines.append(line)
+            else:
+                result_lines.append(line)
+        
+        return '\n'.join(result_lines)
+    
+    def _burn_subtitles(self, video_path, srt_path, output_path):
+        """Burn SRT subtitles into video with basic styling."""
+        try:
+            cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
+            
+            # Escape path for FFmpeg filter (Windows paths need special handling)
+            srt_path_escaped = srt_path.replace('\\', '/').replace(':', '\\:')
+            
+            # Basic subtitle styling: white text, black outline, centered, bottom position
+            subtitle_filter = (
+                f"subtitles='{srt_path_escaped}':force_style='"
+                "FontName=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,"
+                "OutlineColour=&H00000000,Outline=2,Bold=1,"
+                "Alignment=2,MarginV=40'"
+            )
+            
+            cmd = [
+                cmd_exe, '-y',
+                '-i', video_path,
+                '-vf', subtitle_filter,
+                '-c:a', 'copy',
+                output_path
+            ]
+            
+            self.log(f"  Burning subtitles with FFmpeg...")
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            
+            if result.returncode != 0:
+                self.log(f"  FFmpeg subtitle error: {result.stderr}")
+                return False
+            
+            return os.path.exists(output_path)
+            
+        except Exception as e:
+            self.log(f"Error burning subtitles: {e}")
+            return False
