@@ -14,6 +14,7 @@ from google import genai
 from google.genai import types
 from PyQt6.QtCore import QThread, pyqtSignal
 import yt_dlp
+from openai import OpenAI
 
 from src.prompts import VIRAL_MOMENTS_PROMPT, VISUAL_MOMENTS_PROMPT, CAPTION_GENERATION_PROMPT
 from src.core.face_tracker import FaceTracker
@@ -27,12 +28,17 @@ class GeneratorWorker(QThread):
     clipProgress = pyqtSignal(int, int, str)  # (clip_index, percentage, status_text)
     clipComplete = pyqtSignal(int, dict)  # (clip_index, result_data) when single clip finishes
 
-    def __init__(self, source: str, is_local: bool, api_key: str, enable_captions: bool = True):
+    def __init__(self, source: str, is_local: bool, api_key: str, ai_provider: str = "Gemini", enable_captions: bool = True):
         super().__init__()
         self.source = source
         self.is_local = is_local
         self.api_key = api_key
+        self.ai_provider = ai_provider  # "Gemini" or "OpenAI"
         self.enable_captions = enable_captions
+        
+        # AI clients (initialized in run())
+        self.gemini_client = None
+        self.openai_client = None
         
         # Semaphore for limiting concurrent Gemini API calls
         self.caption_semaphore = threading.Semaphore(5)
@@ -64,24 +70,134 @@ class GeneratorWorker(QThread):
     def log(self, message: str):
         self.progress.emit(message)
         print(f"[GeneratorWorker] {message}")
+    
+    def _call_ai_text(self, prompt: str) -> str:
+        """Call AI with text prompt, returns text response"""
+        if self.ai_provider == "Gemini":
+            response = self.gemini_client.models.generate_content(
+                model='gemini-3-flash-preview',
+                contents=prompt
+            )
+            return response.text
+        else:  # OpenAI
+            response = self.openai_client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return response.choices[0].message.content
+    
+    def _call_ai_with_audio(self, prompt: str, audio_path: str) -> str:
+        """Call AI with audio file, returns text response"""
+        if self.ai_provider == "Gemini":
+            with open(audio_path, 'rb') as f:
+                audio_bytes = f.read()
+            
+            content_parts = [
+                types.Part(text=prompt),
+                types.Part(
+                    inline_data=types.Blob(
+                        mime_type="audio/mpeg",
+                        data=audio_bytes,
+                    )
+                )
+            ]
+            
+            response = self.gemini_client.models.generate_content(
+                model='gemini-3-flash-preview',
+                contents=[types.Content(parts=content_parts)]
+            )
+            return response.text
+        else:  # OpenAI - use gpt-4o-mini-transcribe for transcription
+            # First transcribe with gpt-4o-mini-transcribe
+            with open(audio_path, 'rb') as f:
+                transcript = self.openai_client.audio.transcriptions.create(
+                    model="gpt-4o-mini-transcribe",
+                    file=f,
+                    response_format="text"
+                )
+            
+            # Then analyze the transcript with gpt-5-mini
+            full_prompt = f"{prompt}\n\nTRANSCRIPT:\n{transcript}"
+            response = self.openai_client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": full_prompt}]
+            )
+            return response.choices[0].message.content
+    
+    def _call_ai_with_images(self, prompt: str, image_paths: list) -> str:
+        """Call AI with multiple images, returns text response"""
+        if self.ai_provider == "Gemini":
+            content_parts = [types.Part(text=prompt)]
+            
+            for i, img_path in enumerate(image_paths):
+                with open(img_path, 'rb') as f:
+                    image_bytes = f.read()
+                
+                content_parts.append(
+                    types.Part(text=f"Frame {i+1}")
+                )
+                content_parts.append(
+                    types.Part(
+                        inline_data=types.Blob(
+                            mime_type="image/jpeg",
+                            data=image_bytes,
+                        ),
+                        media_resolution={"level": "media_resolution_high"}
+                    )
+                )
+            
+            response = self.gemini_client.models.generate_content(
+                model='gemini-3-flash-preview',
+                contents=[types.Content(parts=content_parts)]
+            )
+            return response.text
+        else:  # OpenAI
+            # Build messages with base64 encoded images
+            content = [{"type": "text", "text": prompt}]
+            
+            for img_path in image_paths:
+                with open(img_path, 'rb') as f:
+                    image_bytes = f.read()
+                    image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+                
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{image_b64}",
+                        "detail": "high"
+                    }
+                })
+            
+            response = self.openai_client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": content}]
+            )
+            return response.choices[0].message.content
 
     def run(self):
         try:
             self.log(f"Initialization started.")
             self.log(f"Source: {self.source}")
             self.log(f"Is Local: {self.is_local}")
+            self.log(f"AI Provider: {self.ai_provider}")
             self.log(f"Output Directory: {self.output_dir}")
             self.log(f"FFmpeg Path detected: {self.ffmpeg_path or 'System PATH'}")
 
             if not self.api_key:
-                raise Exception("Gemini API Key is missing.")
+                raise Exception(f"{self.ai_provider} API Key is missing.")
 
-            self.log(f"Configuring Gemini AI...")
-            self.client = genai.Client(
-                api_key=self.api_key,
-                http_options={'api_version': 'v1alpha'}
-            )
-            self.log("Gemini AI configured successfully.")
+            # Initialize AI client based on provider
+            if self.ai_provider == "Gemini":
+                self.log(f"Configuring Gemini AI...")
+                self.gemini_client = genai.Client(
+                    api_key=self.api_key,
+                    http_options={'api_version': 'v1alpha'}
+                )
+                self.log("Gemini AI configured successfully.")
+            else:  # OpenAI
+                self.log(f"Configuring OpenAI...")
+                self.openai_client = OpenAI(api_key=self.api_key)
+                self.log("OpenAI configured successfully.")
 
             # 1. Get Context (Text or Audio)
             self.log("Step 1: Extracting Context (Subtitles or Audio)...")
@@ -281,48 +397,23 @@ class GeneratorWorker(QThread):
 
         all_moments = []
         for i, chunk_data in enumerate(chunks):
-            self.log(f"Analyzing chunk {i+1}/{len(chunks)} with Gemini...")
+            self.log(f"Analyzing chunk {i+1}/{len(chunks)} with {self.ai_provider}...")
             
             response_text = ""
             try:
                 if context_type == 'text':
                     prompt = VIRAL_MOMENTS_PROMPT + "\n\nTRANSCRIPT:\n" + chunk_data['content']
-                    response = self.client.models.generate_content(
-                        model='gemini-3-flash-preview',
-                        contents=prompt
-                    )
-                    response_text = response.text
+                    response_text = self._call_ai_text(prompt)
                 else:
-                    # Audio analysis with inline data
+                    # Audio analysis
                     self.log(f"Reading audio chunk {i+1} ({os.path.getsize(chunk_data['path'])/1024/1024:.2f} MB)...")
-                    
-                    # Read audio file as bytes
-                    with open(chunk_data['path'], 'rb') as f:
-                        audio_bytes = f.read()
-                    
-                    # Create content with inline audio data
-                    content_parts = [
-                        types.Part(text=VIRAL_MOMENTS_PROMPT),
-                        types.Part(
-                            inline_data=types.Blob(
-                                mime_type="audio/mpeg",
-                                data=audio_bytes,
-                            )
-                        )
-                    ]
-                    
-                    self.log("Sending to Gemini...")
-                    response = self.client.models.generate_content(
-                        model='gemini-3-flash-preview',
-                        contents=[types.Content(parts=content_parts)]
-                    )
-                    response_text = response.text
+                    response_text = self._call_ai_with_audio(VIRAL_MOMENTS_PROMPT, chunk_data['path'])
                     
                     # Cleanup
                     if os.path.exists(chunk_data['path']):
                         os.remove(chunk_data['path'])
 
-                self.log(f"Gemini Response received for chunk {i+1}.")
+                self.log(f"{self.ai_provider} Response received for chunk {i+1}.")
                 # Parse JSON
                 if "```json" in response_text:
                     response_text = response_text.split("```json")[1].split("```")[0]
@@ -392,42 +483,15 @@ class GeneratorWorker(QThread):
             else:
                 self.log(f"Failed to extract frame at {t}s")
 
-        self.log(f"Extracted {len(frames)} frames. Preparing for Gemini...")
+        self.log(f"Extracted {len(frames)} frames. Preparing for {self.ai_provider}...")
         
-        # Build content parts with inline image data
-        content_parts = [types.Part(text=VISUAL_MOMENTS_PROMPT)]
+        # Collect frame paths for AI call
+        frame_paths = [f['path'] for f in frames]
         
         try:
-            for i, frame in enumerate(frames):
-                self.log(f"Reading frame {i+1}...")
-                
-                # Read image file as bytes
-                with open(frame['path'], 'rb') as f:
-                    image_bytes = f.read()
-                
-                # Add frame description
-                content_parts.append(
-                    types.Part(text=f"Frame {i+1} (taken at {timedelta(seconds=frame['time'])})")
-                )
-                
-                # Add image as inline data
-                content_parts.append(
-                    types.Part(
-                        inline_data=types.Blob(
-                            mime_type="image/jpeg",
-                            data=image_bytes,
-                        ),
-                        media_resolution={"level": "media_resolution_high"}
-                    )
-                )
-            
-            self.log("Sending prompt to Gemini...")
-            response = self.client.models.generate_content(
-                model='gemini-3-flash-preview',
-                contents=[types.Content(parts=content_parts)]
-            )
-            response_text = response.text
-            self.log("Gemini response received.")
+            self.log(f"Sending prompt to {self.ai_provider}...")
+            response_text = self._call_ai_with_images(VISUAL_MOMENTS_PROMPT, frame_paths)
+            self.log(f"{self.ai_provider} response received.")
             
             # Cleanup local frames
             for f in frames:
@@ -641,7 +705,7 @@ class GeneratorWorker(QThread):
                 cap.release()
                 raise Exception(f"Invalid target dimensions: {target_w}x{target_h}")
             
-            self.log(f"  Clip {i+1}: Processing frames to {target_w}x{target_h} @ {fps}fps")
+            self.log(f"  Clip {i+1}: Processing frames to {target_w}x{target_h} @ {fps}fps (preserving original frame rate)")
             
             # Create frames directory
             frames_dir = os.path.join(self.output_dir, f"frames_{i}")
@@ -649,21 +713,13 @@ class GeneratorWorker(QThread):
             
             tracker = FaceTracker()
             frame_count = 0
-            processed_frame_count = 0
-            target_fps = 30  # Target 30fps for output
-            frame_skip = max(1, int(fps / target_fps))  # Skip frames to achieve 30fps
             
-            self.log(f"  Clip {i+1}: Source FPS: {fps}, Target FPS: {target_fps}, Frame skip: {frame_skip}")
+            self.log(f"  Clip {i+1}: Processing all frames at original FPS: {fps}")
             
             while True:
                 ret, frame = cap.read()
                 if not ret:
                     break
-                
-                # Skip frames to downsample to 30fps
-                if frame_count % frame_skip != 0:
-                    frame_count += 1
-                    continue
                 
                 # Apply face tracking and cropping
                 try:
@@ -684,38 +740,36 @@ class GeneratorWorker(QThread):
                     cropped = cv2.resize(cropped, (target_w, target_h))
                 
                 # Save frame as image
-                frame_path = os.path.join(frames_dir, f"frame_{processed_frame_count:06d}.jpg")
+                frame_path = os.path.join(frames_dir, f"frame_{frame_count:06d}.jpg")
                 cv2.imwrite(frame_path, cropped, [cv2.IMWRITE_JPEG_QUALITY, 95])
                 
                 frame_count += 1
-                processed_frame_count += 1
                 
-                # Update progress every 30 processed frames (30-70% range for frame processing)
-                if processed_frame_count % 30 == 0:
-                    self.log(f"  Clip {i+1}: Processed {processed_frame_count} frames...")
-                    expected_frames = int(total_frames / frame_skip)
-                    if expected_frames > 0:
-                        progress = 30 + int((processed_frame_count / expected_frames) * 40)
-                        self.clipProgress.emit(i, progress, f"Frame {processed_frame_count}/{expected_frames}")
+                # Update progress every 30 frames (30-70% range for frame processing)
+                if frame_count % 30 == 0:
+                    self.log(f"  Clip {i+1}: Processed {frame_count} frames...")
+                    if total_frames > 0:
+                        progress = 30 + int((frame_count / total_frames) * 40)
+                        self.clipProgress.emit(i, progress, f"Frame {frame_count}/{total_frames}")
             
             cap.release()
             tracker.release()
             
-            self.log(f"  Clip {i+1}: Processed {processed_frame_count} frames total (downsampled from {frame_count})")
+            self.log(f"  Clip {i+1}: Processed {frame_count} frames total at original frame rate")
             self.clipProgress.emit(i, 70, "Frames processed")
             
-            if processed_frame_count == 0:
+            if frame_count == 0:
                 raise Exception("No frames were processed")
             
-            # 3. Use FFmpeg to create video from frames at 30fps
-            self.log(f"  Clip {i+1}: Creating video from frames with FFmpeg at {target_fps}fps...")
+            # 3. Use FFmpeg to create video from frames at original fps
+            self.log(f"  Clip {i+1}: Creating video from frames with FFmpeg at {fps}fps (original frame rate)...")
             self.clipProgress.emit(i, 75, "Encoding video...")
             temp_cropped_video = temp_cropped_path.replace('.mp4', '_video.mp4')
             
             cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
             cmd_frames = [
                 cmd_exe, '-y',
-                '-framerate', str(target_fps),  # Use target 30fps
+                '-framerate', str(fps),  # Use original fps
                 '-i', os.path.join(frames_dir, 'frame_%06d.jpg'),
                 '-c:v', 'libx264',
                 '-pix_fmt', 'yuv420p',
@@ -749,9 +803,9 @@ class GeneratorWorker(QThread):
                 '-i', temp_cropped_video,
                 '-i', temp_raw_path,
                 '-c:v', 'copy',  # Copy video stream (already encoded)
-                '-c:a', 'aac', '-b:a', '192k',  # High quality audio (was 128k)
+                '-c:a', 'aac', '-b:a', '192k',  # High quality audio
                 '-map', '0:v:0', '-map', '1:a:0',
-                '-shortest',
+                '-shortest',  # Use shortest stream (should be same length now)
                 '-movflags', '+faststart',  # Optimize for web streaming
                 temp_final_no_subs
             ]
@@ -927,7 +981,7 @@ class GeneratorWorker(QThread):
     def _generate_captions_from_clip(self, clip_index, clip_video_path, start_time, end_time):
         """
         Generate captions from the downloaded clip (not the full video).
-        Extracts audio from the clip and sends to Gemini.
+        Extracts audio from the clip and sends to AI.
         Returns path to .srt file or None if failed.
         """
         try:
@@ -952,29 +1006,12 @@ class GeneratorWorker(QThread):
                 self.log(f"  [Caption] Clip {clip_index+1}: Failed to extract audio")
                 return None
             
-            self.log(f"  [Caption] Clip {clip_index+1}: Sending audio to Gemini for transcription...")
+            self.log(f"  [Caption] Clip {clip_index+1}: Sending audio to {self.ai_provider} for transcription...")
             
-            # Send audio to Gemini for transcription
-            with open(audio_path, 'rb') as f:
-                audio_bytes = f.read()
+            # Send audio to AI for transcription
+            srt_content = self._call_ai_with_audio(CAPTION_GENERATION_PROMPT, audio_path)
             
-            content_parts = [
-                types.Part(text=CAPTION_GENERATION_PROMPT),
-                types.Part(
-                    inline_data=types.Blob(
-                        mime_type="audio/mpeg",
-                        data=audio_bytes,
-                    )
-                )
-            ]
-            
-            response = self.client.models.generate_content(
-                model='gemini-3-flash-preview',
-                contents=[types.Content(parts=content_parts)]
-            )
-            srt_content = response.text.strip()
-            
-            self.log(f"  [Caption] Clip {clip_index+1}: Gemini returned captions (length: {len(srt_content)} chars)")
+            self.log(f"  [Caption] Clip {clip_index+1}: {self.ai_provider} returned captions (length: {len(srt_content)} chars)")
             self.log(f"  [Caption] Clip {clip_index+1}: Caption preview:\n{srt_content[:500]}...")
             
             # Cleanup temp audio
@@ -989,7 +1026,7 @@ class GeneratorWorker(QThread):
             
             # Validate SRT format
             if not self._validate_srt(srt_content):
-                self.log(f"  [Caption] Clip {clip_index+1}: Invalid SRT format received from Gemini")
+                self.log(f"  [Caption] Clip {clip_index+1}: Invalid SRT format received from {self.ai_provider}")
                 return None
             
             # NO OFFSET NEEDED - clip already starts at 00:00:00
@@ -1024,14 +1061,10 @@ class GeneratorWorker(QThread):
                     self.log(f"  Clip {clip_index+1}: No VTT content found for time range")
                     return None
                 
-                # Send to Gemini for SRT conversion
+                # Send to AI for SRT conversion
                 prompt = CAPTION_GENERATION_PROMPT + f"\n\nVTT CONTENT:\n{caption_content}"
-                response = self.client.models.generate_content(
-                    model='gemini-3-flash-preview',
-                    contents=prompt
-                )
-                srt_content = response.text.strip()
-                self.log(f"  Clip {clip_index+1}: Gemini returned captions (length: {len(srt_content)} chars)")
+                srt_content = self._call_ai_text(prompt)
+                self.log(f"  Clip {clip_index+1}: {self.ai_provider} returned captions (length: {len(srt_content)} chars)")
                 self.log(f"  Clip {clip_index+1}: Caption preview:\n{srt_content[:500]}...")
                 
             elif context_type == 'audio':
@@ -1041,26 +1074,9 @@ class GeneratorWorker(QThread):
                     self.log(f"  Clip {clip_index+1}: Failed to extract audio segment")
                     return None
                 
-                # Send audio to Gemini for transcription
-                with open(audio_segment_path, 'rb') as f:
-                    audio_bytes = f.read()
-                
-                content_parts = [
-                    types.Part(text=CAPTION_GENERATION_PROMPT),
-                    types.Part(
-                        inline_data=types.Blob(
-                            mime_type="audio/mpeg",
-                            data=audio_bytes,
-                        )
-                    )
-                ]
-                
-                response = self.client.models.generate_content(
-                    model='gemini-3-flash-preview',
-                    contents=[types.Content(parts=content_parts)]
-                )
-                srt_content = response.text.strip()
-                self.log(f"  Clip {clip_index+1}: Gemini returned captions (length: {len(srt_content)} chars)")
+                # Send audio to AI for transcription
+                srt_content = self._call_ai_with_audio(CAPTION_GENERATION_PROMPT, audio_segment_path)
+                self.log(f"  Clip {clip_index+1}: {self.ai_provider} returned captions (length: {len(srt_content)} chars)")
                 self.log(f"  Clip {clip_index+1}: Caption preview:\n{srt_content[:500]}...")
                 
                 # Cleanup temp audio
@@ -1082,7 +1098,7 @@ class GeneratorWorker(QThread):
             
             # Validate SRT format
             if not self._validate_srt(srt_content):
-                self.log(f"  Clip {clip_index+1}: Invalid SRT format received from Gemini")
+                self.log(f"  Clip {clip_index+1}: Invalid SRT format received from {self.ai_provider}")
                 return None
             
             # CRITICAL: Offset timestamps to be relative to 00:00:00

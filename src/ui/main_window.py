@@ -348,7 +348,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Application Settings")
-        self.setFixedSize(350, 220)
+        self.setFixedSize(400, 350)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self.settings = QSettings()
 
@@ -374,18 +374,48 @@ class SettingsDialog(QDialog):
         content = QWidget()
         c_layout = QVBoxLayout(content)
         
-        lbl = QLabel("API Key Configuration")
-        lbl.setObjectName("labelText")
-        self.api_input = QLineEdit()
-        self.api_input.setPlaceholderText("Enter Gemini API key...")
-        self.api_input.setEchoMode(QLineEdit.EchoMode.Password)
+        # AI Provider Selection
+        provider_label = QLabel("AI Provider")
+        provider_label.setObjectName("labelText")
         
-        saved_key = self.settings.value("api_key", "")
-        if saved_key:
-            self.api_input.setText(saved_key)
-            
-        c_layout.addWidget(lbl)
-        c_layout.addWidget(self.api_input)
+        self.provider_combo = QComboBox()
+        self.provider_combo.addItems(["Gemini", "OpenAI"])
+        
+        saved_provider = self.settings.value("ai_provider", "Gemini")
+        
+        c_layout.addWidget(provider_label)
+        c_layout.addWidget(self.provider_combo)
+        c_layout.addSpacing(10)
+        
+        # Gemini API Key
+        self.gemini_label = QLabel("Gemini API Key")
+        self.gemini_label.setObjectName("labelText")
+        self.gemini_input = QLineEdit()
+        self.gemini_input.setPlaceholderText("Enter Gemini API key...")
+        self.gemini_input.setEchoMode(QLineEdit.EchoMode.Password)
+        
+        saved_gemini_key = self.settings.value("gemini_api_key", "")
+        if saved_gemini_key:
+            self.gemini_input.setText(saved_gemini_key)
+        
+        c_layout.addWidget(self.gemini_label)
+        c_layout.addWidget(self.gemini_input)
+        c_layout.addSpacing(10)
+        
+        # OpenAI API Key
+        self.openai_label = QLabel("OpenAI API Key")
+        self.openai_label.setObjectName("labelText")
+        self.openai_input = QLineEdit()
+        self.openai_input.setPlaceholderText("Enter OpenAI API key...")
+        self.openai_input.setEchoMode(QLineEdit.EchoMode.Password)
+        
+        saved_openai_key = self.settings.value("openai_api_key", "")
+        if saved_openai_key:
+            self.openai_input.setText(saved_openai_key)
+        
+        c_layout.addWidget(self.openai_label)
+        c_layout.addWidget(self.openai_input)
+        
         c_layout.addStretch()
         
         btn_layout = QHBoxLayout()
@@ -393,8 +423,8 @@ class SettingsDialog(QDialog):
         apply_btn = QPushButton("Apply")
         apply_btn.setObjectName("primaryBtn")
         
-        clear_btn.clicked.connect(self.clear_key)
-        apply_btn.clicked.connect(self.save_key)
+        clear_btn.clicked.connect(self.clear_keys)
+        apply_btn.clicked.connect(self.save_settings)
         
         btn_layout.addStretch()
         btn_layout.addWidget(clear_btn)
@@ -404,15 +434,45 @@ class SettingsDialog(QDialog):
         
         layout.addWidget(header)
         layout.addWidget(content)
+        
+        # Connect signal and set initial value AFTER all widgets are created
+        self.provider_combo.currentTextChanged.connect(self.on_provider_changed)
+        self.provider_combo.setCurrentText(saved_provider)
+        
+        # Update visibility based on provider
+        self.on_provider_changed(saved_provider)
 
-    def clear_key(self):
-        self.api_input.clear()
-        self.settings.remove("api_key")
+    def on_provider_changed(self, provider):
+        """Show/hide API key fields based on selected provider"""
+        if provider == "Gemini":
+            self.gemini_label.setVisible(True)
+            self.gemini_input.setVisible(True)
+            self.openai_label.setVisible(False)
+            self.openai_input.setVisible(False)
+        else:  # OpenAI
+            self.gemini_label.setVisible(False)
+            self.gemini_input.setVisible(False)
+            self.openai_label.setVisible(True)
+            self.openai_input.setVisible(True)
 
-    def save_key(self):
-        val = self.api_input.text().strip()
-        if val:
-            self.settings.setValue("api_key", val)
+    def clear_keys(self):
+        self.gemini_input.clear()
+        self.openai_input.clear()
+        self.settings.remove("gemini_api_key")
+        self.settings.remove("openai_api_key")
+
+    def save_settings(self):
+        provider = self.provider_combo.currentText()
+        self.settings.setValue("ai_provider", provider)
+        
+        gemini_key = self.gemini_input.text().strip()
+        if gemini_key:
+            self.settings.setValue("gemini_api_key", gemini_key)
+        
+        openai_key = self.openai_input.text().strip()
+        if openai_key:
+            self.settings.setValue("openai_api_key", openai_key)
+        
         self.accept()
 
 class LoadingDialog(QDialog):
@@ -909,11 +969,11 @@ class MainWindow(QMainWindow):
         sc_text_layout = QVBoxLayout()
         sc_text_layout.setSpacing(2)
         
-        sc_label = QLabel("Enable Smart Crop")
+        sc_label = QLabel("Heavy Transform (Beta)")
         sc_label.setObjectName("labelText")
         sc_label.setStyleSheet("border: none; background-color: transparent;")
         
-        sc_sub = QLabel("Keep speakers centered")
+        sc_sub = QLabel("Avoid copyright detection (not guaranteed)")
         sc_sub.setObjectName("mutedText")
         sc_sub.setStyleSheet("border: none; background-color: transparent;")
         
@@ -1091,11 +1151,21 @@ class MainWindow(QMainWindow):
         self.preview_title.clear()
 
     def on_generate(self):
-        api_key = self.settings.value("api_key", "").strip()
-        if not api_key:
-            QMessageBox.warning(self, "API Key Required", "Please configure your Gemini API Key in Settings first.")
-            self.open_settings()
-            return
+        # Get AI provider and corresponding API key
+        ai_provider = self.settings.value("ai_provider", "Gemini").strip()
+        
+        if ai_provider == "Gemini":
+            api_key = self.settings.value("gemini_api_key", "").strip()
+            if not api_key:
+                QMessageBox.warning(self, "API Key Required", "Please configure your Gemini API Key in Settings first.")
+                self.open_settings()
+                return
+        else:  # OpenAI
+            api_key = self.settings.value("openai_api_key", "").strip()
+            if not api_key:
+                QMessageBox.warning(self, "API Key Required", "Please configure your OpenAI API Key in Settings first.")
+                self.open_settings()
+                return
         
         # Get caption setting
         enable_captions = self.auto_caption_toggle.isChecked()
@@ -1105,7 +1175,7 @@ class MainWindow(QMainWindow):
         self.loading_dialog.update_text("Analyzing content for viral moments...")
         self.loading_dialog.show()
             
-        self.g_worker = GeneratorWorker(self.source, self.is_local, api_key, enable_captions)
+        self.g_worker = GeneratorWorker(self.source, self.is_local, api_key, ai_provider, enable_captions)
         self.g_worker.progress.connect(lambda msg: print(f"[Worker] {msg}"))
         self.g_worker.clipsFound.connect(self.on_clips_found)
         self.g_worker.clipProgress.connect(self.on_clip_progress)
