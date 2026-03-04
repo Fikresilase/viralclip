@@ -123,16 +123,26 @@ QLineEdit:focus, QComboBox:focus {
 }
 
 QComboBox::drop-down {
-    border: none;
-    width: 30px;
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 35px;
+    border-left: 1px solid #3A3A3A;
+    background-color: #252525;
+    border-top-right-radius: 8px;
+    border-bottom-right-radius: 8px;
+}
+
+QComboBox::drop-down:hover {
+    background-color: #2D2D2D;
 }
 
 QComboBox::down-arrow {
     image: none;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid #9CA3AF;
-    margin-right: 12px;
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid #E0E0E0;
 }
 
 QComboBox QAbstractItemView {
@@ -348,7 +358,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Application Settings")
-        self.setFixedSize(400, 350)
+        self.setFixedSize(400, 280)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self.settings = QSettings()
 
@@ -374,32 +384,14 @@ class SettingsDialog(QDialog):
         content = QWidget()
         c_layout = QVBoxLayout(content)
         
-        # AI Provider Selection
+        # AI Provider info
         provider_label = QLabel("AI Provider")
         provider_label.setObjectName("labelText")
-        
-        self.provider_combo = QComboBox()
-        self.provider_combo.addItems(["Gemini", "OpenAI"])
-        
-        saved_provider = self.settings.value("ai_provider", "Gemini")
+        provider_info = QLabel("OpenAI (GPT-5-mini + Whisper-1)")
+        provider_info.setObjectName("mutedText")
         
         c_layout.addWidget(provider_label)
-        c_layout.addWidget(self.provider_combo)
-        c_layout.addSpacing(10)
-        
-        # Gemini API Key
-        self.gemini_label = QLabel("Gemini API Key")
-        self.gemini_label.setObjectName("labelText")
-        self.gemini_input = QLineEdit()
-        self.gemini_input.setPlaceholderText("Enter Gemini API key...")
-        self.gemini_input.setEchoMode(QLineEdit.EchoMode.Password)
-        
-        saved_gemini_key = self.settings.value("gemini_api_key", "")
-        if saved_gemini_key:
-            self.gemini_input.setText(saved_gemini_key)
-        
-        c_layout.addWidget(self.gemini_label)
-        c_layout.addWidget(self.gemini_input)
+        c_layout.addWidget(provider_info)
         c_layout.addSpacing(10)
         
         # OpenAI API Key
@@ -434,41 +426,12 @@ class SettingsDialog(QDialog):
         
         layout.addWidget(header)
         layout.addWidget(content)
-        
-        # Connect signal and set initial value AFTER all widgets are created
-        self.provider_combo.currentTextChanged.connect(self.on_provider_changed)
-        self.provider_combo.setCurrentText(saved_provider)
-        
-        # Update visibility based on provider
-        self.on_provider_changed(saved_provider)
-
-    def on_provider_changed(self, provider):
-        """Show/hide API key fields based on selected provider"""
-        if provider == "Gemini":
-            self.gemini_label.setVisible(True)
-            self.gemini_input.setVisible(True)
-            self.openai_label.setVisible(False)
-            self.openai_input.setVisible(False)
-        else:  # OpenAI
-            self.gemini_label.setVisible(False)
-            self.gemini_input.setVisible(False)
-            self.openai_label.setVisible(True)
-            self.openai_input.setVisible(True)
 
     def clear_keys(self):
-        self.gemini_input.clear()
         self.openai_input.clear()
-        self.settings.remove("gemini_api_key")
         self.settings.remove("openai_api_key")
 
     def save_settings(self):
-        provider = self.provider_combo.currentText()
-        self.settings.setValue("ai_provider", provider)
-        
-        gemini_key = self.gemini_input.text().strip()
-        if gemini_key:
-            self.settings.setValue("gemini_api_key", gemini_key)
-        
         openai_key = self.openai_input.text().strip()
         if openai_key:
             self.settings.setValue("openai_api_key", openai_key)
@@ -733,6 +696,12 @@ class MainWindow(QMainWindow):
         self.placeholder_cards = []
         
         self._init_ui()
+    
+    def closeEvent(self, event):
+        """Clean up temp files when app closes"""
+        from src.utils.storage import StorageManager
+        StorageManager().cleanup()
+        event.accept()
 
     def _init_ui(self):
         central = QWidget()
@@ -967,26 +936,6 @@ class MainWindow(QMainWindow):
         sc_layout.setSpacing(12)
         
         sc_text_layout = QVBoxLayout()
-        sc_text_layout.setSpacing(2)
-        
-        sc_label = QLabel("Heavy Transform (Beta)")
-        sc_label.setObjectName("labelText")
-        sc_label.setStyleSheet("border: none; background-color: transparent;")
-        
-        sc_sub = QLabel("Avoid copyright detection (not guaranteed)")
-        sc_sub.setObjectName("mutedText")
-        sc_sub.setStyleSheet("border: none; background-color: transparent;")
-        
-        sc_text_layout.addWidget(sc_label)
-        sc_text_layout.addWidget(sc_sub)
-        
-        self.smart_crop_toggle = ToggleButton()
-        self.smart_crop_toggle.setChecked(True)
-        
-        sc_layout.addLayout(sc_text_layout)
-        sc_layout.addStretch()
-        sc_layout.addWidget(self.smart_crop_toggle)
-        
         # Auto caption box
         ac_box = QFrame()
         ac_box.setStyleSheet("background-color: #2D2D2D; border: 1px solid #333333; border-radius: 4px;")
@@ -1009,7 +958,7 @@ class MainWindow(QMainWindow):
         ac_text_layout.addWidget(ac_sub)
         
         self.auto_caption_toggle = ToggleButton()
-        self.auto_caption_toggle.setChecked(True)
+        self.auto_caption_toggle.setChecked(False)
         
         ac_layout.addLayout(ac_text_layout)
         ac_layout.addStretch()
@@ -1023,8 +972,6 @@ class MainWindow(QMainWindow):
         
         s_layout.addWidget(s_title)
         s_layout.addWidget(sep2)
-        s_layout.addWidget(sc_box)
-        s_layout.addSpacing(6)
         s_layout.addWidget(ac_box)
         s_layout.addSpacing(20)
         s_layout.addWidget(generate_btn, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -1151,21 +1098,12 @@ class MainWindow(QMainWindow):
         self.preview_title.clear()
 
     def on_generate(self):
-        # Get AI provider and corresponding API key
-        ai_provider = self.settings.value("ai_provider", "Gemini").strip()
-        
-        if ai_provider == "Gemini":
-            api_key = self.settings.value("gemini_api_key", "").strip()
-            if not api_key:
-                QMessageBox.warning(self, "API Key Required", "Please configure your Gemini API Key in Settings first.")
-                self.open_settings()
-                return
-        else:  # OpenAI
-            api_key = self.settings.value("openai_api_key", "").strip()
-            if not api_key:
-                QMessageBox.warning(self, "API Key Required", "Please configure your OpenAI API Key in Settings first.")
-                self.open_settings()
-                return
+        # Get OpenAI API key
+        api_key = self.settings.value("openai_api_key", "").strip()
+        if not api_key:
+            QMessageBox.warning(self, "API Key Required", "Please configure your OpenAI API Key in Settings first.")
+            self.open_settings()
+            return
         
         # Get caption setting
         enable_captions = self.auto_caption_toggle.isChecked()
@@ -1175,7 +1113,7 @@ class MainWindow(QMainWindow):
         self.loading_dialog.update_text("Analyzing content for viral moments...")
         self.loading_dialog.show()
             
-        self.g_worker = GeneratorWorker(self.source, self.is_local, api_key, ai_provider, enable_captions)
+        self.g_worker = GeneratorWorker(self.source, self.is_local, api_key, enable_captions)
         self.g_worker.progress.connect(lambda msg: print(f"[Worker] {msg}"))
         self.g_worker.clipsFound.connect(self.on_clips_found)
         self.g_worker.clipProgress.connect(self.on_clip_progress)

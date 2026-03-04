@@ -10,13 +10,11 @@ import threading
 import base64
 
 import cv2
-from google import genai
-from google.genai import types
 from PyQt6.QtCore import QThread, pyqtSignal
 import yt_dlp
 from openai import OpenAI
 
-from src.prompts import VIRAL_MOMENTS_PROMPT, VISUAL_MOMENTS_PROMPT, CAPTION_GENERATION_PROMPT
+from src.prompts import VIRAL_MOMENTS_PROMPT, VISUAL_MOMENTS_PROMPT
 from src.core.face_tracker import FaceTracker
 from src.utils.storage import StorageManager
 
@@ -28,22 +26,20 @@ class GeneratorWorker(QThread):
     clipProgress = pyqtSignal(int, int, str)  # (clip_index, percentage, status_text)
     clipComplete = pyqtSignal(int, dict)  # (clip_index, result_data) when single clip finishes
 
-    def __init__(self, source: str, is_local: bool, api_key: str, ai_provider: str = "Gemini", enable_captions: bool = True):
+    def __init__(self, source: str, is_local: bool, api_key: str, enable_captions: bool = True):
         super().__init__()
         self.source = source
         self.is_local = is_local
         self.api_key = api_key
-        self.ai_provider = ai_provider  # "Gemini" or "OpenAI"
         self.enable_captions = enable_captions
         
-        # AI clients (initialized in run())
-        self.gemini_client = None
+        # OpenAI client (initialized in run())
         self.openai_client = None
         
-        # Semaphore for limiting concurrent Gemini API calls
+        # Semaphore for limiting concurrent API calls
         self.caption_semaphore = threading.Semaphore(5)
         
-        # Dictionary to store caption results {clip_index: srt_path}
+        # Dictionary to store caption results {clip_index: subtitle_path}
         self.caption_results = {}
         
         # Use StorageManager for output directory
@@ -73,131 +69,70 @@ class GeneratorWorker(QThread):
     
     def _call_ai_text(self, prompt: str) -> str:
         """Call AI with text prompt, returns text response"""
-        if self.ai_provider == "Gemini":
-            response = self.gemini_client.models.generate_content(
-                model='gemini-3-flash-preview',
-                contents=prompt
-            )
-            return response.text
-        else:  # OpenAI
-            response = self.openai_client.chat.completions.create(
-                model="gpt-5-mini",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            return response.choices[0].message.content
+        response = self.openai_client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        return response.choices[0].message.content
     
     def _call_ai_with_audio(self, prompt: str, audio_path: str) -> str:
-        """Call AI with audio file, returns text response"""
-        if self.ai_provider == "Gemini":
-            with open(audio_path, 'rb') as f:
-                audio_bytes = f.read()
-            
-            content_parts = [
-                types.Part(text=prompt),
-                types.Part(
-                    inline_data=types.Blob(
-                        mime_type="audio/mpeg",
-                        data=audio_bytes,
-                    )
-                )
-            ]
-            
-            response = self.gemini_client.models.generate_content(
-                model='gemini-3-flash-preview',
-                contents=[types.Content(parts=content_parts)]
+        """Call AI with audio file: transcribe with whisper-1, then analyze with gpt-5-mini"""
+        # First transcribe with whisper-1
+        with open(audio_path, 'rb') as f:
+            transcript = self.openai_client.audio.transcriptions.create(
+                model="whisper-1",
+                file=f,
+                response_format="text"
             )
-            return response.text
-        else:  # OpenAI - use gpt-4o-mini-transcribe for transcription
-            # First transcribe with gpt-4o-mini-transcribe
-            with open(audio_path, 'rb') as f:
-                transcript = self.openai_client.audio.transcriptions.create(
-                    model="gpt-4o-mini-transcribe",
-                    file=f,
-                    response_format="text"
-                )
-            
-            # Then analyze the transcript with gpt-5-mini
-            full_prompt = f"{prompt}\n\nTRANSCRIPT:\n{transcript}"
-            response = self.openai_client.chat.completions.create(
-                model="gpt-5-mini",
-                messages=[{"role": "user", "content": full_prompt}]
-            )
-            return response.choices[0].message.content
+        
+        # Then analyze the transcript with gpt-5-mini
+        full_prompt = f"{prompt}\n\nTRANSCRIPT:\n{transcript}"
+        response = self.openai_client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[{"role": "user", "content": full_prompt}]
+        )
+        return response.choices[0].message.content
     
     def _call_ai_with_images(self, prompt: str, image_paths: list) -> str:
         """Call AI with multiple images, returns text response"""
-        if self.ai_provider == "Gemini":
-            content_parts = [types.Part(text=prompt)]
+        # Build messages with base64 encoded images
+        content = [{"type": "text", "text": prompt}]
+        
+        for img_path in image_paths:
+            with open(img_path, 'rb') as f:
+                image_bytes = f.read()
+                image_b64 = base64.b64encode(image_bytes).decode('utf-8')
             
-            for i, img_path in enumerate(image_paths):
-                with open(img_path, 'rb') as f:
-                    image_bytes = f.read()
-                
-                content_parts.append(
-                    types.Part(text=f"Frame {i+1}")
-                )
-                content_parts.append(
-                    types.Part(
-                        inline_data=types.Blob(
-                            mime_type="image/jpeg",
-                            data=image_bytes,
-                        ),
-                        media_resolution={"level": "media_resolution_high"}
-                    )
-                )
-            
-            response = self.gemini_client.models.generate_content(
-                model='gemini-3-flash-preview',
-                contents=[types.Content(parts=content_parts)]
-            )
-            return response.text
-        else:  # OpenAI
-            # Build messages with base64 encoded images
-            content = [{"type": "text", "text": prompt}]
-            
-            for img_path in image_paths:
-                with open(img_path, 'rb') as f:
-                    image_bytes = f.read()
-                    image_b64 = base64.b64encode(image_bytes).decode('utf-8')
-                
-                content.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{image_b64}",
-                        "detail": "high"
-                    }
-                })
-            
-            response = self.openai_client.chat.completions.create(
-                model="gpt-5-mini",
-                messages=[{"role": "user", "content": content}]
-            )
-            return response.choices[0].message.content
+            content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{image_b64}",
+                    "detail": "high"
+                }
+            })
+        
+        response = self.openai_client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[{"role": "user", "content": content}]
+        )
+        return response.choices[0].message.content
 
     def run(self):
         try:
             self.log(f"Initialization started.")
             self.log(f"Source: {self.source}")
             self.log(f"Is Local: {self.is_local}")
-            self.log(f"AI Provider: {self.ai_provider}")
+            self.log(f"AI Provider: OpenAI")
             self.log(f"Output Directory: {self.output_dir}")
             self.log(f"FFmpeg Path detected: {self.ffmpeg_path or 'System PATH'}")
 
             if not self.api_key:
-                raise Exception(f"{self.ai_provider} API Key is missing.")
+                raise Exception("OpenAI API Key is missing.")
 
-            # Initialize AI client based on provider
-            if self.ai_provider == "Gemini":
-                self.log(f"Configuring Gemini AI...")
-                self.gemini_client = genai.Client(
-                    api_key=self.api_key,
-                    http_options={'api_version': 'v1alpha'}
-                )
-                self.log("Gemini AI configured successfully.")
-            else:  # OpenAI
-                self.log(f"Configuring OpenAI...")
-                self.openai_client = OpenAI(api_key=self.api_key)
-                self.log("OpenAI configured successfully.")
+            # Initialize OpenAI client
+            self.log(f"Configuring OpenAI...")
+            self.openai_client = OpenAI(api_key=self.api_key)
+            self.log("OpenAI configured successfully.")
 
             # 1. Get Context (Text or Audio)
             self.log("Step 1: Extracting Context (Subtitles or Audio)...")
@@ -397,7 +332,7 @@ class GeneratorWorker(QThread):
 
         all_moments = []
         for i, chunk_data in enumerate(chunks):
-            self.log(f"Analyzing chunk {i+1}/{len(chunks)} with {self.ai_provider}...")
+            self.log(f"Analyzing chunk {i+1}/{len(chunks)} with OpenAI...")
             
             response_text = ""
             try:
@@ -413,7 +348,7 @@ class GeneratorWorker(QThread):
                     if os.path.exists(chunk_data['path']):
                         os.remove(chunk_data['path'])
 
-                self.log(f"{self.ai_provider} Response received for chunk {i+1}.")
+                self.log(f"OpenAI Response received for chunk {i+1}.")
                 # Parse JSON
                 if "```json" in response_text:
                     response_text = response_text.split("```json")[1].split("```")[0]
@@ -483,15 +418,15 @@ class GeneratorWorker(QThread):
             else:
                 self.log(f"Failed to extract frame at {t}s")
 
-        self.log(f"Extracted {len(frames)} frames. Preparing for {self.ai_provider}...")
+        self.log(f"Extracted {len(frames)} frames. Preparing for OpenAI...")
         
         # Collect frame paths for AI call
         frame_paths = [f['path'] for f in frames]
         
         try:
-            self.log(f"Sending prompt to {self.ai_provider}...")
+            self.log(f"Sending prompt to OpenAI...")
             response_text = self._call_ai_with_images(VISUAL_MOMENTS_PROMPT, frame_paths)
-            self.log(f"{self.ai_provider} response received.")
+            self.log(f"OpenAI response received.")
             
             # Cleanup local frames
             for f in frames:
@@ -805,7 +740,7 @@ class GeneratorWorker(QThread):
                 '-c:v', 'copy',  # Copy video stream (already encoded)
                 '-c:a', 'aac', '-b:a', '192k',  # High quality audio
                 '-map', '0:v:0', '-map', '1:a:0',
-                '-shortest',  # Use shortest stream (should be same length now)
+                '-shortest',  # Use shortest stream
                 '-movflags', '+faststart',  # Optimize for web streaming
                 temp_final_no_subs
             ]
@@ -821,14 +756,14 @@ class GeneratorWorker(QThread):
                 
                 try:
                     # Wait for caption generation to complete (with timeout)
-                    srt_path = caption_future.result(timeout=60)
+                    subtitle_path = caption_future.result(timeout=60)
                     caption_executor.shutdown(wait=False)
                     
-                    if srt_path and os.path.exists(srt_path):
+                    if subtitle_path and os.path.exists(subtitle_path):
                         self.log(f"  Clip {i+1}: Burning captions...")
                         self.clipProgress.emit(i, 94, "Burning captions...")
                         
-                        if self._burn_subtitles(temp_final_no_subs, srt_path, out_path):
+                        if self._burn_subtitles(temp_final_no_subs, subtitle_path, out_path):
                             self.log(f"  Clip {i+1}: Captions burned successfully")
                             # Cleanup temp file
                             if os.path.exists(temp_final_no_subs):
@@ -980,9 +915,9 @@ class GeneratorWorker(QThread):
     
     def _generate_captions_from_clip(self, clip_index, clip_video_path, start_time, end_time):
         """
-        Generate captions from the downloaded clip (not the full video).
-        Extracts audio from the clip and sends to AI.
-        Returns path to .srt file or None if failed.
+        Generate Hormozi-style karaoke captions from the downloaded clip.
+        Uses Whisper-1 for word-level timestamps, then generates .ass with karaoke \k tags.
+        Returns path to .ass file or None if failed.
         """
         try:
             self.log(f"  [Caption] Clip {clip_index+1}: Extracting audio from downloaded clip...")
@@ -1006,45 +941,140 @@ class GeneratorWorker(QThread):
                 self.log(f"  [Caption] Clip {clip_index+1}: Failed to extract audio")
                 return None
             
-            self.log(f"  [Caption] Clip {clip_index+1}: Sending audio to {self.ai_provider} for transcription...")
+            self.log(f"  [Caption] Clip {clip_index+1}: Sending audio to Whisper-1 for word-level transcription...")
             
-            # Send audio to AI for transcription
-            srt_content = self._call_ai_with_audio(CAPTION_GENERATION_PROMPT, audio_path)
-            
-            self.log(f"  [Caption] Clip {clip_index+1}: {self.ai_provider} returned captions (length: {len(srt_content)} chars)")
-            self.log(f"  [Caption] Clip {clip_index+1}: Caption preview:\n{srt_content[:500]}...")
+            # Call Whisper-1 with word-level timestamps
+            with open(audio_path, 'rb') as f:
+                transcription = self.openai_client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=f,
+                    response_format="verbose_json",
+                    timestamp_granularities=["word"]
+                )
             
             # Cleanup temp audio
             if os.path.exists(audio_path):
                 os.remove(audio_path)
             
-            # Clean up response (remove markdown if present)
-            if "```srt" in srt_content:
-                srt_content = srt_content.split("```srt")[1].split("```")[0].strip()
-            elif "```" in srt_content:
-                srt_content = srt_content.split("```")[1].split("```")[0].strip()
+            # Extract words with timestamps
+            words = transcription.words if hasattr(transcription, 'words') and transcription.words else []
             
-            # Validate SRT format
-            if not self._validate_srt(srt_content):
-                self.log(f"  [Caption] Clip {clip_index+1}: Invalid SRT format received from {self.ai_provider}")
+            if not words:
+                self.log(f"  [Caption] Clip {clip_index+1}: No words returned from Whisper")
                 return None
             
-            # NO OFFSET NEEDED - clip already starts at 00:00:00
-            self.log(f"  [Caption] Clip {clip_index+1}: No timestamp offset needed (clip-based)")
+            self.log(f"  [Caption] Clip {clip_index+1}: Whisper returned {len(words)} words with timestamps")
             
-            # Save SRT file
-            srt_path = self.storage.get_new_path(f"captions_{clip_index}.srt")
-            with open(srt_path, 'w', encoding='utf-8') as f:
-                f.write(srt_content)
+            # Generate Hormozi-style karaoke ASS file
+            ass_path = self.storage.get_new_path(f"captions_{clip_index}.ass")
+            ass_content = self._generate_karaoke_ass(words)
             
-            self.log(f"  [Caption] Clip {clip_index+1}: Captions saved to {srt_path}")
-            return srt_path
+            with open(ass_path, 'w', encoding='utf-8') as f:
+                f.write(ass_content)
+            
+            self.log(f"  [Caption] Clip {clip_index+1}: Karaoke ASS captions saved to {ass_path}")
+            return ass_path
             
         except Exception as e:
             self.log(f"  [Caption] Clip {clip_index+1}: Caption generation failed: {e}")
             import traceback
             self.log(traceback.format_exc())
             return None
+    
+    def _generate_karaoke_ass(self, words):
+        """
+        Generate ASS file with Hormozi-style karaoke word-by-word highlighting.
+        Uses \\k tags for word-by-word color fill effect.
+        Words appear white, then fill to yellow as they are spoken.
+        """
+        ass_lines = [
+            "[Script Info]",
+            "Title: Hormozi Style Karaoke Captions",
+            "ScriptType: v4.00+",
+            "WrapStyle: 0",
+            "PlayResX: 1080",
+            "PlayResY: 1920",
+            "ScaledBorderAndShadow: yes",
+            "",
+            "[V4+ Styles]",
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+            # PrimaryColour = white (before spoken), SecondaryColour = yellow (fill color for \\k)
+            # OutlineColour = black, thick outline (4px), no shadow, bold, centered bottom
+            "Style: Main,Arial Black,68,&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,1.5,2,50,50,120,1",
+            "",
+            "[Events]",
+            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
+        ]
+        
+        # Group words into phrases (4-7 words or ~30 chars, break on long pauses)
+        phrases = []
+        current_phrase = []
+        
+        for i, w in enumerate(words):
+            word_text = w.word.strip() if hasattr(w, 'word') else w.get('word', '').strip()
+            word_start = w.start if hasattr(w, 'start') else w.get('start', 0)
+            word_end = w.end if hasattr(w, 'end') else w.get('end', 0)
+            
+            if not word_text:
+                continue
+            
+            current_phrase.append({
+                'word': word_text,
+                'start': word_start,
+                'end': word_end
+            })
+            
+            # Check if we should break the phrase
+            total_chars = sum(len(p['word']) for p in current_phrase)
+            next_word_start = None
+            if i + 1 < len(words):
+                next_w = words[i + 1]
+                next_word_start = next_w.start if hasattr(next_w, 'start') else next_w.get('start', 0)
+            
+            should_break = (
+                len(current_phrase) >= 6 or
+                total_chars > 30 or
+                (next_word_start is not None and next_word_start - word_end > 0.5) or  # Long pause
+                i == len(words) - 1  # Last word
+            )
+            
+            if should_break and current_phrase:
+                phrases.append(current_phrase)
+                current_phrase = []
+        
+        # Generate dialogue lines with karaoke tags
+        for phrase in phrases:
+            if not phrase:
+                continue
+            
+            phrase_start = phrase[0]['start']
+            phrase_end = phrase[-1]['end'] + 0.3  # Small grace period
+            
+            start_str = self._seconds_to_ass_time(phrase_start)
+            end_str = self._seconds_to_ass_time(phrase_end)
+            
+            # Build karaoke text with \k tags (centiseconds)
+            karaoke_parts = []
+            for pw in phrase:
+                # Duration in centiseconds for the \k tag
+                duration_cs = max(1, round((pw['end'] - pw['start']) * 100))
+                # \kf = smooth fill from left to right (most Hormozi-like)
+                karaoke_parts.append(f"{{\\kf{duration_cs}}}{pw['word']} ")
+            
+            text_line = "".join(karaoke_parts).rstrip()
+            
+            ass_lines.append(f"Dialogue: 0,{start_str},{end_str},Main,,0,0,0,,{text_line}")
+        
+        return "\n".join(ass_lines)
+    
+    def _seconds_to_ass_time(self, s):
+        """Convert seconds to ASS timestamp format (H:MM:SS.cc)."""
+        h = int(s // 3600)
+        m = int((s % 3600) // 60)
+        sec = s % 60
+        cs = int((sec % 1) * 100)
+        sec = int(sec)
+        return f"{h}:{m:02d}:{sec:02d}.{cs:02d}"
 
     def _generate_captions_for_clip(self, clip_index, start_time, end_time, context_type, context_path):
         """
@@ -1406,24 +1436,38 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         
         return f"{h}:{m}:{s}.{cs}"
     
-    def _burn_subtitles(self, video_path, srt_path, output_path):
-        """Convert SRT to ASS and burn ASS subtitles into video with Hormozi-style thick outlines."""
+    def _burn_subtitles(self, video_path, subtitle_path, output_path):
+        """Burn subtitles into video. Handles both .ass and .srt files."""
         try:
-            # Convert SRT to ASS
-            self.log(f"  Converting SRT to ASS format...")
-            ass_path = self._convert_srt_to_ass(srt_path)
-            
-            if not ass_path or not os.path.exists(ass_path):
-                self.log(f"  Failed to convert to ASS, falling back to SRT")
-                return self._burn_srt_fallback(video_path, srt_path, output_path)
-            
             cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
             
-            # Escape path for FFmpeg filter (Windows paths need special handling)
-            ass_path_escaped = ass_path.replace('\\', '/').replace(':', '\\:')
+            # Determine subtitle type based on extension
+            is_ass = subtitle_path.lower().endswith('.ass')
             
-            # Use ASS filter for advanced styling
-            subtitle_filter = f"ass='{ass_path_escaped}'"
+            if is_ass:
+                # Burn ASS directly (karaoke style from Whisper pipeline)
+                self.log(f"  Burning karaoke ASS subtitles with FFmpeg...")
+                ass_path_escaped = subtitle_path.replace('\\', '/').replace(':', '\\:')
+                subtitle_filter = f"ass='{ass_path_escaped}'"
+            else:
+                # Convert SRT to ASS first (legacy path)
+                self.log(f"  Converting SRT to ASS format...")
+                ass_path = self._convert_srt_to_ass(subtitle_path)
+                
+                if ass_path and os.path.exists(ass_path):
+                    self.log(f"  Burning ASS subtitles with FFmpeg...")
+                    ass_path_escaped = ass_path.replace('\\', '/').replace(':', '\\:')
+                    subtitle_filter = f"ass='{ass_path_escaped}'"
+                else:
+                    # Fallback: burn SRT directly with basic styling
+                    self.log(f"  Failed to convert to ASS, burning SRT directly...")
+                    srt_path_escaped = subtitle_path.replace('\\', '/').replace(':', '\\:')
+                    subtitle_filter = (
+                        f"subtitles='{srt_path_escaped}':force_style='"
+                        "FontName=Arial Black,FontSize=24,PrimaryColour=&H00FFFFFF,"
+                        "OutlineColour=&H00000000,Outline=3,Bold=1,"
+                        "Alignment=2,MarginV=80'"
+                    )
             
             cmd = [
                 cmd_exe, '-y',
@@ -1433,39 +1477,46 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 output_path
             ]
             
-            self.log(f"  Burning ASS subtitles with FFmpeg...")
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             
             if result.returncode != 0:
-                self.log(f"  FFmpeg ASS subtitle error: {result.stderr}")
-                self.log(f"  Falling back to SRT...")
-                return self._burn_srt_fallback(video_path, srt_path, output_path)
+                self.log(f"  FFmpeg subtitle error: {result.stderr}")
+                
+                # If ASS failed, try basic SRT fallback
+                if is_ass or (not is_ass and 'ass=' in subtitle_filter):
+                    self.log(f"  ASS burning failed, trying basic subtitle fallback...")
+                    return self._burn_srt_fallback(video_path, subtitle_path, output_path)
+                return False
             
-            # Cleanup ASS file
-            if os.path.exists(ass_path):
+            # Cleanup temporary ASS file if we converted from SRT
+            if not is_ass and 'ass_path' in locals() and ass_path and os.path.exists(ass_path):
                 os.remove(ass_path)
             
             return os.path.exists(output_path)
             
         except Exception as e:
-            self.log(f"Error burning ASS subtitles: {e}")
-            return self._burn_srt_fallback(video_path, srt_path, output_path)
+            self.log(f"Error burning subtitles: {e}")
+            return self._burn_srt_fallback(video_path, subtitle_path, output_path)
     
-    def _burn_srt_fallback(self, video_path, srt_path, output_path):
-        """Fallback to basic SRT burning if ASS fails."""
+    def _burn_srt_fallback(self, video_path, subtitle_path, output_path):
+        """Fallback to basic subtitle burning if ASS fails."""
         try:
             cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
             
             # Escape path for FFmpeg filter
-            srt_path_escaped = srt_path.replace('\\', '/').replace(':', '\\:')
+            path_escaped = subtitle_path.replace('\\', '/').replace(':', '\\:')
             
-            # Basic subtitle styling
-            subtitle_filter = (
-                f"subtitles='{srt_path_escaped}':force_style='"
-                "FontName=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,"
-                "OutlineColour=&H00000000,Outline=2,Bold=1,"
-                "Alignment=2,MarginV=40'"
-            )
+            if subtitle_path.lower().endswith('.ass'):
+                # Even for ASS fallback, try the ass filter with simpler settings
+                subtitle_filter = f"ass='{path_escaped}'"
+            else:
+                # Basic SRT subtitle styling
+                subtitle_filter = (
+                    f"subtitles='{path_escaped}':force_style='"
+                    "FontName=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,"
+                    "OutlineColour=&H00000000,Outline=2,Bold=1,"
+                    "Alignment=2,MarginV=40'"
+                )
             
             cmd = [
                 cmd_exe, '-y',
@@ -1475,15 +1526,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 output_path
             ]
             
-            self.log(f"  Burning SRT subtitles with FFmpeg (fallback)...")
+            self.log(f"  Burning subtitles with FFmpeg (fallback)...")
             result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             
             if result.returncode != 0:
-                self.log(f"  FFmpeg SRT subtitle error: {result.stderr}")
+                self.log(f"  FFmpeg subtitle fallback error: {result.stderr}")
                 return False
             
             return os.path.exists(output_path)
             
         except Exception as e:
-            self.log(f"Error burning SRT subtitles (fallback): {e}")
+            self.log(f"Error burning subtitles (fallback): {e}")
             return False
