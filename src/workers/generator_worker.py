@@ -770,26 +770,21 @@ class GeneratorWorker(QThread):
                                 os.remove(temp_final_no_subs)
                         else:
                             self.log(f"  Clip {i+1}: Failed to burn captions, using video without captions")
-                            if os.path.exists(temp_final_no_subs):
-                                shutil.move(temp_final_no_subs, out_path)
+                            self._apply_watermark(temp_final_no_subs, out_path)
                     else:
                         self.log(f"  Clip {i+1}: No captions generated, using video without captions")
-                        if os.path.exists(temp_final_no_subs):
-                            shutil.move(temp_final_no_subs, out_path)
+                        self._apply_watermark(temp_final_no_subs, out_path)
                 except concurrent.futures.TimeoutError:
                     self.log(f"  Clip {i+1}: Caption generation timed out, using video without captions")
-                    if os.path.exists(temp_final_no_subs):
-                        shutil.move(temp_final_no_subs, out_path)
+                    self._apply_watermark(temp_final_no_subs, out_path)
                 except Exception as e:
                     self.log(f"  Clip {i+1}: Caption error: {e}, using video without captions")
-                    if os.path.exists(temp_final_no_subs):
-                        shutil.move(temp_final_no_subs, out_path)
+                    self._apply_watermark(temp_final_no_subs, out_path)
             else:
-                # Captions disabled or no future, just rename temp file to final
+                # Captions disabled or no future, apply watermark only
                 if not self.enable_captions:
                     self.log(f"  Clip {i+1}: Captions disabled")
-                if os.path.exists(temp_final_no_subs):
-                    shutil.move(temp_final_no_subs, out_path)
+                self._apply_watermark(temp_final_no_subs, out_path)
             
             # Cleanup Temps
             if os.path.exists(temp_raw_path):
@@ -1436,17 +1431,68 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         
         return f"{h}:{m}:{s}.{cs}"
     
-    def _burn_subtitles(self, video_path, subtitle_path, output_path):
-        """Burn subtitles into video. Handles both .ass and .srt files."""
+    def _get_watermark_filter(self):
+        """Return ffmpeg drawtext filter for a moving transparent watermark."""
+        # Fast diagonal bounce: text drifts across the screen and bounces off edges
+        # Speed: 150px/s horizontal, 90px/s vertical (5x speed)
+        # Opacity: 60% white — clearly visible bold watermark
+        # Using a literal newline character for multiline support
+        watermark = (
+            "drawtext=text='made with\n"
+            "mirage.company'"
+            ":fontsize=80"
+            ":fontcolor=white@0.60"
+            ":font='Arial Black'"
+            ":line_spacing=15"
+            ":x='abs(mod(t*150\\,2*(w-tw))-(w-tw))'"
+            ":y='abs(mod(t*90\\,2*(h-th))-(h-th))'"
+        )
+        return watermark
+    
+    def _apply_watermark(self, input_path, output_path):
+        """Apply only the moving watermark to a video (no subtitles)."""
         try:
             cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
+            watermark_filter = self._get_watermark_filter()
+            
+            cmd = [
+                cmd_exe, '-y',
+                '-i', input_path,
+                '-vf', watermark_filter,
+                '-c:a', 'copy',
+                output_path
+            ]
+            
+            self.log(f"  Applying watermark...")
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            
+            if result.returncode != 0:
+                self.log(f"  Watermark failed: {result.stderr}")
+                # Fallback: just move the file without watermark
+                if os.path.exists(input_path):
+                    shutil.move(input_path, output_path)
+            else:
+                # Cleanup input file
+                if os.path.exists(input_path) and os.path.exists(output_path):
+                    os.remove(input_path)
+                    
+        except Exception as e:
+            self.log(f"  Watermark error: {e}, using video without watermark")
+            if os.path.exists(input_path) and not os.path.exists(output_path):
+                shutil.move(input_path, output_path)
+
+    def _burn_subtitles(self, video_path, subtitle_path, output_path):
+        """Burn subtitles + watermark into video. Handles both .ass and .srt files."""
+        try:
+            cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
+            watermark_filter = self._get_watermark_filter()
             
             # Determine subtitle type based on extension
             is_ass = subtitle_path.lower().endswith('.ass')
             
             if is_ass:
                 # Burn ASS directly (karaoke style from Whisper pipeline)
-                self.log(f"  Burning karaoke ASS subtitles with FFmpeg...")
+                self.log(f"  Burning karaoke ASS subtitles + watermark with FFmpeg...")
                 ass_path_escaped = subtitle_path.replace('\\', '/').replace(':', '\\:')
                 subtitle_filter = f"ass='{ass_path_escaped}'"
             else:
@@ -1455,7 +1501,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 ass_path = self._convert_srt_to_ass(subtitle_path)
                 
                 if ass_path and os.path.exists(ass_path):
-                    self.log(f"  Burning ASS subtitles with FFmpeg...")
+                    self.log(f"  Burning ASS subtitles + watermark with FFmpeg...")
                     ass_path_escaped = ass_path.replace('\\', '/').replace(':', '\\:')
                     subtitle_filter = f"ass='{ass_path_escaped}'"
                 else:
@@ -1469,10 +1515,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         "Alignment=2,MarginV=80'"
                     )
             
+            # Chain subtitle filter with watermark filter
+            combined_filter = f"{subtitle_filter},{watermark_filter}"
+            
             cmd = [
                 cmd_exe, '-y',
                 '-i', video_path,
-                '-vf', subtitle_filter,
+                '-vf', combined_filter,
                 '-c:a', 'copy',
                 output_path
             ]
@@ -1499,18 +1548,17 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             return self._burn_srt_fallback(video_path, subtitle_path, output_path)
     
     def _burn_srt_fallback(self, video_path, subtitle_path, output_path):
-        """Fallback to basic subtitle burning if ASS fails."""
+        """Fallback to basic subtitle burning + watermark if ASS fails."""
         try:
             cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
+            watermark_filter = self._get_watermark_filter()
             
             # Escape path for FFmpeg filter
             path_escaped = subtitle_path.replace('\\', '/').replace(':', '\\:')
             
             if subtitle_path.lower().endswith('.ass'):
-                # Even for ASS fallback, try the ass filter with simpler settings
                 subtitle_filter = f"ass='{path_escaped}'"
             else:
-                # Basic SRT subtitle styling
                 subtitle_filter = (
                     f"subtitles='{path_escaped}':force_style='"
                     "FontName=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,"
@@ -1518,10 +1566,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     "Alignment=2,MarginV=40'"
                 )
             
+            # Chain subtitle filter with watermark
+            combined_filter = f"{subtitle_filter},{watermark_filter}"
+            
             cmd = [
                 cmd_exe, '-y',
                 '-i', video_path,
-                '-vf', subtitle_filter,
+                '-vf', combined_filter,
                 '-c:a', 'copy',
                 output_path
             ]
