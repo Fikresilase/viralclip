@@ -387,7 +387,7 @@ class SettingsDialog(QDialog):
         # AI Provider info
         provider_label = QLabel("AI Provider")
         provider_label.setObjectName("labelText")
-        provider_info = QLabel("OpenAI (GPT-5-mini + Whisper-1)")
+        provider_info = QLabel("OpenAI")
         provider_info.setObjectName("mutedText")
         
         c_layout.addWidget(provider_label)
@@ -681,7 +681,7 @@ class ResultItem(QFrame):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Content Factory")
+        self.setWindowTitle("Mirage")
         self.resize(1024, 768)
         
         # Set central widget to use app background
@@ -720,7 +720,7 @@ class MainWindow(QMainWindow):
         title_box = QHBoxLayout()
         icon_lbl = QLabel("🤖")
         icon_lbl.setStyleSheet("font-size: 24px; background-color: transparent;")
-        app_title = QLabel("Content Factory")
+        app_title = QLabel("Mirage")
         app_title.setStyleSheet("font-weight: 800; font-size: 16px; color: #FAFAFA; background-color: transparent; letter-spacing: -0.5px;")
         title_box.addWidget(icon_lbl)
         title_box.addWidget(app_title)

@@ -20,7 +20,7 @@ from src.ui.main_window import MainWindow
 def main():
     """Initialize the QApplication and show the main window."""
     app = QApplication(sys.argv)
-    app.setApplicationName("Content Factory")
+    app.setApplicationName("Mirage")
     app.setOrganizationName("ViralClips")
 
     # Apply global font

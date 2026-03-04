@@ -1439,7 +1439,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # Using a literal newline character for multiline support
         watermark = (
             "drawtext=text='made with\n"
-            "mirage.company'"
+            "Mirage.company'"
             ":fontsize=80"
             ":fontcolor=white@0.60"
             ":font='Arial Black'"
