@@ -4,9 +4,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -28,29 +26,18 @@ ENV/
 env/
 .venv/
 
-# PyCharm
-.idea/
+# Build and Packaging
+build/
+dist/
+bin/
+*.spec
+Mirage.spec
+*.exe
 
-# VS Code
+# IDEs
+.idea/
 .vscode/
 *.code-workspace
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# Pytest
-.pytest_cache/
-.coverage
-htmlcov/
-*.cover
-
-# MyPy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Distribution / Packaging
-*.whl
 
 # Environment Variables
 .env
@@ -62,7 +49,6 @@ dmypy.json
 Thumbs.db
 *.swp
 *.swo
-*~
 
 # Logs
 *.log
@@ -73,16 +59,16 @@ logs/
 *.sqlite
 *.sqlite3
 
-# Video Processing (temporary files)
+# Video Processing (temp files)
 temp/
 tmp/
 *.tmp
 output/
 exports/
 
-# Large Media Files (uncomment if needed)
-# *.mp4
-# *.avi
-# *.mov
-# *.mkv
-# *.webm
+# Large Media
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm

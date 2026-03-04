@@ -1,4 +1,5 @@
 import os
+import sys
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QLineEdit, QStackedWidget, QFileDialog, 
@@ -358,6 +359,14 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Application Settings")
+        
+        # Set window icon
+        icon_path = self._get_resource_path(os.path.join("src", "assets", "logo.png"))
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+        elif os.path.exists(self._get_resource_path(os.path.join("src", "assets", "favicon.ico"))):
+            self.setWindowIcon(QIcon(self._get_resource_path(os.path.join("src", "assets", "favicon.ico"))))
+
         self.setFixedSize(400, 280)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         self.settings = QSettings()
@@ -426,6 +435,16 @@ class SettingsDialog(QDialog):
         
         layout.addWidget(header)
         layout.addWidget(content)
+
+    def _get_resource_path(self, relative_path):
+        """Get absolute path to resource, works for dev and for PyInstaller"""
+        try:
+            # PyInstaller creates a temp folder and stores path in _MEIPASS
+            base_path = sys._MEIPASS
+        except Exception:
+            # Running as script: return current project directory
+            base_path = os.path.abspath(".")
+        return os.path.join(base_path, relative_path)
 
     def clear_keys(self):
         self.openai_input.clear()
@@ -682,6 +701,14 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Mirage")
+        
+        # Set window icon
+        icon_path = self._get_resource_path(os.path.join("src", "assets", "logo.png"))
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+        elif os.path.exists(self._get_resource_path(os.path.join("src", "assets", "favicon.ico"))):
+            self.setWindowIcon(QIcon(self._get_resource_path(os.path.join("src", "assets", "favicon.ico"))))
+            
         self.resize(1024, 768)
         
         # Set central widget to use app background
@@ -702,6 +729,16 @@ class MainWindow(QMainWindow):
         from src.utils.storage import StorageManager
         StorageManager().cleanup()
         event.accept()
+
+    def _get_resource_path(self, relative_path):
+        """Get absolute path to resource, works for dev and for PyInstaller"""
+        try:
+            # PyInstaller creates a temp folder and stores path in _MEIPASS
+            base_path = sys._MEIPASS
+        except Exception:
+            # Running as script: return current project directory
+            base_path = os.path.abspath(".")
+        return os.path.join(base_path, relative_path)
 
     def _init_ui(self):
         central = QWidget()

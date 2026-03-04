@@ -8,6 +8,7 @@ from datetime import timedelta
 import concurrent.futures
 import threading
 import base64
+import sys
 
 import cv2
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -46,22 +47,33 @@ class GeneratorWorker(QThread):
         self.storage = StorageManager()
         self.output_dir = self.storage.temp_dir 
         
-        # Locate system ffmpeg
-        self.ffmpeg_path = shutil.which('ffmpeg')
-        if not self.ffmpeg_path:
-             # Fallback to None (let yt-dlp find it in PATH, use 'ffmpeg' command for subprocess)
-             self.ffmpeg_path = None
+        # Determine base path (where our bin/ folder lives)
+        self.base_dir = self._get_resource_path()
         
-        # Determine ffprobe path (usually next to ffmpeg)
-        self.ffprobe_path = shutil.which('ffprobe')
-        if not self.ffprobe_path and self.ffmpeg_path:
-             # Try to guess based on ffmpeg path
-             base = os.path.dirname(self.ffmpeg_path)
-             probe_guess = os.path.join(base, 'ffprobe.exe' if os.name=='nt' else 'ffprobe')
-             if os.path.exists(probe_guess):
-                 self.ffprobe_path = probe_guess
-             else:
-                 self.ffprobe_path = 'ffprobe'
+        # Locate bundled ffmpeg binaries
+        bin_dir = os.path.join(self.base_dir, "bin")
+        ffmpeg_bundled = os.path.join(bin_dir, "ffmpeg.exe") if os.name == 'nt' else os.path.join(bin_dir, "ffmpeg")
+        ffprobe_bundled = os.path.join(bin_dir, "ffprobe.exe") if os.name == 'nt' else os.path.join(bin_dir, "ffprobe")
+        
+        # Priority: Bundle > System Path > Literal command
+        if os.path.exists(ffmpeg_bundled):
+             self.ffmpeg_path = ffmpeg_bundled
+        else:
+             self.ffmpeg_path = shutil.which('ffmpeg') or 'ffmpeg'
+             
+        if os.path.exists(ffprobe_bundled):
+             self.ffprobe_path = ffprobe_bundled
+        else:
+             self.ffprobe_path = shutil.which('ffprobe') or 'ffprobe'
+
+    def _get_resource_path(self):
+        """Get absolute path to resource, works for dev and for PyInstaller"""
+        try:
+            # PyInstaller creates a temp folder and stores path in _MEIPASS
+            return sys._MEIPASS
+        except Exception:
+            # Running as script: return current project directory
+            return os.path.abspath(".")
 
     def log(self, message: str):
         self.progress.emit(message)

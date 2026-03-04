@@ -8,3 +8,4 @@ Pillow
 numpy
 mediapipe==0.10.9
 protobuf<4.21.0
+pyinstaller
