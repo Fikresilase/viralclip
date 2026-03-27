@@ -31,7 +31,7 @@ build/
 dist/
 bin/
 *.spec
-Mirage.spec
+ViralClip.spec
 *.exe
 
 # IDEs

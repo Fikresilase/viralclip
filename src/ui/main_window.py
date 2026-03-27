@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QLineEdit, QStackedWidget, QFileDialog, 
     QDialog, QCheckBox, QComboBox, QGridLayout, QProgressBar,
-    QFrame, QMessageBox, QApplication, QScrollArea, QSizePolicy
+    QFrame, QMessageBox, QApplication, QScrollArea, QSizePolicy, QSpinBox
 )
 from PyQt6.QtCore import Qt, QSettings, QSize, QTimer
 from PyQt6.QtGui import QPixmap, QImage, QColor, QFont, QIcon, QPainter, QBrush, QPen
@@ -700,7 +700,7 @@ class ResultItem(QFrame):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Mirage")
+        self.setWindowTitle("ViralClip")
         
         # Set window icon
         icon_path = self._get_resource_path(os.path.join("src", "assets", "logo.png"))
@@ -757,7 +757,7 @@ class MainWindow(QMainWindow):
         title_box = QHBoxLayout()
         icon_lbl = QLabel("🤖")
         icon_lbl.setStyleSheet("font-size: 24px; background-color: transparent;")
-        app_title = QLabel("Mirage")
+        app_title = QLabel("ViralClip")
         app_title.setStyleSheet("font-weight: 800; font-size: 16px; color: #FAFAFA; background-color: transparent; letter-spacing: -0.5px;")
         title_box.addWidget(icon_lbl)
         title_box.addWidget(app_title)
@@ -973,6 +973,51 @@ class MainWindow(QMainWindow):
         sc_layout.setSpacing(12)
         
         sc_text_layout = QVBoxLayout()
+        # Clip Count Box
+        cc_box = QFrame()
+        cc_box.setStyleSheet("background-color: #2D2D2D; border: 1px solid #333333; border-radius: 4px;")
+        cc_layout = QHBoxLayout(cc_box)
+        cc_layout.setContentsMargins(12, 12, 12, 12)
+        cc_layout.setSpacing(12)
+        
+        cc_text_layout = QVBoxLayout()
+        cc_text_layout.setSpacing(2)
+        
+        cc_label = QLabel("Clip Count")
+        cc_label.setObjectName("labelText")
+        cc_label.setStyleSheet("border: none; background-color: transparent;")
+        
+        cc_sub = QLabel("Number of clips to generate")
+        cc_sub.setObjectName("mutedText")
+        cc_sub.setStyleSheet("border: none; background-color: transparent;")
+        
+        cc_text_layout.addWidget(cc_label)
+        cc_text_layout.addWidget(cc_sub)
+        
+        self.clip_count_spinbox = QSpinBox()
+        self.clip_count_spinbox.setMinimum(1)
+        self.clip_count_spinbox.setMaximum(15)
+        self.clip_count_spinbox.setValue(5)
+        self.clip_count_spinbox.setStyleSheet("""
+            QSpinBox {
+                background-color: #1A1A1A;
+                border: 1px solid #404040;
+                border-radius: 4px;
+                color: white;
+                padding: 4px;
+                width: 40px;
+                height: 24px;
+            }
+            QSpinBox::up-button, QSpinBox::down-button {
+                width: 16px;
+                background-color: transparent;
+            }
+        """)
+        
+        cc_layout.addLayout(cc_text_layout)
+        cc_layout.addStretch()
+        cc_layout.addWidget(self.clip_count_spinbox)
+
         # Auto caption box
         ac_box = QFrame()
         ac_box.setStyleSheet("background-color: #2D2D2D; border: 1px solid #333333; border-radius: 4px;")
@@ -1009,6 +1054,7 @@ class MainWindow(QMainWindow):
         
         s_layout.addWidget(s_title)
         s_layout.addWidget(sep2)
+        s_layout.addWidget(cc_box)
         s_layout.addWidget(ac_box)
         s_layout.addSpacing(20)
         s_layout.addWidget(generate_btn, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -1145,12 +1191,15 @@ class MainWindow(QMainWindow):
         # Get caption setting
         enable_captions = self.auto_caption_toggle.isChecked()
         
+        # Get clip count
+        num_clips = self.clip_count_spinbox.value()
+        
         # Show loading dialog until clips are found
         self.loading_dialog = LoadingDialog(self)
-        self.loading_dialog.update_text("Analyzing content for viral moments...")
+        self.loading_dialog.update_text(f"Analyzing content for {num_clips} viral moments...")
         self.loading_dialog.show()
             
-        self.g_worker = GeneratorWorker(self.source, self.is_local, api_key, enable_captions)
+        self.g_worker = GeneratorWorker(self.source, self.is_local, api_key, enable_captions, num_clips)
         self.g_worker.progress.connect(lambda msg: print(f"[Worker] {msg}"))
         self.g_worker.clipsFound.connect(self.on_clips_found)
         self.g_worker.clipProgress.connect(self.on_clip_progress)

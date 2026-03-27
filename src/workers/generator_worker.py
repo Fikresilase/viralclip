@@ -14,10 +14,24 @@ import cv2
 from PyQt6.QtCore import QThread, pyqtSignal
 import yt_dlp
 from openai import OpenAI
+from pydantic import BaseModel, Field
+from typing import List, Optional
 
 from src.prompts import VIRAL_MOMENTS_PROMPT, VISUAL_MOMENTS_PROMPT
 from src.core.face_tracker import FaceTracker
 from src.utils.storage import StorageManager
+
+class ViralMoment(BaseModel):
+    start_time: str = Field(description="The exact start timestamp (MM:SS)")
+    end_time: str = Field(description="The exact end timestamp (MM:SS)")
+    duration_type: Optional[str] = Field(None, description="Dopamine/Story/Value")
+    virality_score: int = Field(description="A score from 0-100 indicating viral potential")
+    psychological_hook: Optional[str] = Field(None, description="Pattern Interrupt / Open Loop / Social Currency / Sudden Motion / Facial Distortion / Satisfying Visual")
+    title: str = Field(description="A catchy, click-baity title for the clip")
+    reason: str = Field(description="Explain the emotional trigger and why the ending forces a rewatch")
+
+class ViralMomentsResponse(BaseModel):
+    clips: list[ViralMoment]
 
 class GeneratorWorker(QThread):
     progress = pyqtSignal(str)
@@ -27,12 +41,13 @@ class GeneratorWorker(QThread):
     clipProgress = pyqtSignal(int, int, str)  # (clip_index, percentage, status_text)
     clipComplete = pyqtSignal(int, dict)  # (clip_index, result_data) when single clip finishes
 
-    def __init__(self, source: str, is_local: bool, api_key: str, enable_captions: bool = True):
+    def __init__(self, source: str, is_local: bool, api_key: str, enable_captions: bool = True, num_clips: int = 5):
         super().__init__()
         self.source = source
         self.is_local = is_local
         self.api_key = api_key
         self.enable_captions = enable_captions
+        self.num_clips = num_clips
         
         # OpenAI client (initialized in run())
         self.openai_client = None
@@ -80,12 +95,14 @@ class GeneratorWorker(QThread):
         print(f"[GeneratorWorker] {message}")
     
     def _call_ai_text(self, prompt: str) -> str:
-        """Call AI with text prompt, returns text response"""
-        response = self.openai_client.chat.completions.create(
+        """Call AI with text prompt, returns JSON text response via parsed model"""
+        response = self.openai_client.beta.chat.completions.parse(
             model="gpt-5-mini",
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            response_format=ViralMomentsResponse
         )
-        return response.choices[0].message.content
+        # Convert structured parsed object back to JSON text so our existing code works
+        return response.choices[0].message.parsed.model_dump_json()
     
     def _call_ai_with_audio(self, prompt: str, audio_path: str) -> str:
         """Call AI with audio file: transcribe with whisper-1, then analyze with gpt-5-mini"""
@@ -97,16 +114,17 @@ class GeneratorWorker(QThread):
                 response_format="text"
             )
         
-        # Then analyze the transcript with gpt-5-mini
+        # Then analyze the transcript with gpt-5-mini using structured parsing
         full_prompt = f"{prompt}\n\nTRANSCRIPT:\n{transcript}"
-        response = self.openai_client.chat.completions.create(
+        response = self.openai_client.beta.chat.completions.parse(
             model="gpt-5-mini",
-            messages=[{"role": "user", "content": full_prompt}]
+            messages=[{"role": "user", "content": full_prompt}],
+            response_format=ViralMomentsResponse
         )
-        return response.choices[0].message.content
+        return response.choices[0].message.parsed.model_dump_json()
     
     def _call_ai_with_images(self, prompt: str, image_paths: list) -> str:
-        """Call AI with multiple images, returns text response"""
+        """Call AI with multiple images, returns JSON text response via parsed model"""
         # Build messages with base64 encoded images
         content = [{"type": "text", "text": prompt}]
         
@@ -123,11 +141,12 @@ class GeneratorWorker(QThread):
                 }
             })
         
-        response = self.openai_client.chat.completions.create(
+        response = self.openai_client.beta.chat.completions.parse(
             model="gpt-5-mini",
-            messages=[{"role": "user", "content": content}]
+            messages=[{"role": "user", "content": content}],
+            response_format=ViralMomentsResponse
         )
-        return response.choices[0].message.content
+        return response.choices[0].message.parsed.model_dump_json()
 
     def run(self):
         try:
@@ -349,12 +368,13 @@ class GeneratorWorker(QThread):
             response_text = ""
             try:
                 if context_type == 'text':
-                    prompt = VIRAL_MOMENTS_PROMPT + "\n\nTRANSCRIPT:\n" + chunk_data['content']
+                    prompt = VIRAL_MOMENTS_PROMPT.format(num_clips=self.num_clips) + "\n\nTRANSCRIPT:\n" + chunk_data['content']
                     response_text = self._call_ai_text(prompt)
                 else:
                     # Audio analysis
                     self.log(f"Reading audio chunk {i+1} ({os.path.getsize(chunk_data['path'])/1024/1024:.2f} MB)...")
-                    response_text = self._call_ai_with_audio(VIRAL_MOMENTS_PROMPT, chunk_data['path'])
+                    prompt = VIRAL_MOMENTS_PROMPT.format(num_clips=self.num_clips)
+                    response_text = self._call_ai_with_audio(prompt, chunk_data['path'])
                     
                     # Cleanup
                     if os.path.exists(chunk_data['path']):
@@ -362,12 +382,12 @@ class GeneratorWorker(QThread):
 
                 self.log(f"OpenAI Response received for chunk {i+1}.")
                 # Parse JSON
-                if "```json" in response_text:
-                    response_text = response_text.split("```json")[1].split("```")[0]
-                elif "```" in response_text:
-                     response_text = response_text.split("```")[1].split("```")[0]
-                
-                data = json.loads(response_text.strip())
+                try:
+                    parsed_response = json.loads(response_text)
+                    data = parsed_response.get("clips", [])
+                except json.JSONDecodeError as je:
+                    self.log(f"JSON Parse Error. Error: {je}")
+                    data = []
                 self.log(f"Parsed {len(data)} moments from chunk {i+1}.")
                 
                 # Offset timestamps
@@ -437,7 +457,8 @@ class GeneratorWorker(QThread):
         
         try:
             self.log(f"Sending prompt to OpenAI...")
-            response_text = self._call_ai_with_images(VISUAL_MOMENTS_PROMPT, frame_paths)
+            prompt = VISUAL_MOMENTS_PROMPT.format(num_clips=self.num_clips)
+            response_text = self._call_ai_with_images(prompt, frame_paths)
             self.log(f"OpenAI response received.")
             
             # Cleanup local frames
@@ -446,16 +467,12 @@ class GeneratorWorker(QThread):
                     os.remove(f['path'])
 
             # Parse JSON
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0]
-            elif "```" in response_text:
-                 response_text = response_text.split("```")[1].split("```")[0]
-            
             try:
-                data = json.loads(response_text.strip())
-            except json.JSONDecodeError:
-                self.log("JSON Decode Error in visual analysis response.")
-                return []
+                parsed_response = json.loads(response_text)
+                data = parsed_response.get("clips", [])
+            except json.JSONDecodeError as je:
+                self.log(f"JSON Parse Error. Error: {je}")
+                data = []
 
             self.log(f"Parsed {len(data)} moments from visual analysis.")
             
@@ -1451,7 +1468,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # Using a literal newline character for multiline support
         watermark = (
             "drawtext=text='made with\n"
-            "Mirage.company'"
+            "ViralClip'"
             ":fontsize=80"
             ":fontcolor=white@0.60"
             ":font='Arial Black'"

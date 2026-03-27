@@ -1,63 +1,39 @@
 
 VIRAL_MOMENTS_PROMPT = """
-You are an expert viral content editor. Your goal is to identify the most engaging, shareable, and high-retention segments from the provided content.
+You are a Senior Viral Growth Engineer specializing in Short-Form retention. Your goal is to extract {num_clips} high-arousal clips from this video that hijack human psychology to force a "share" or a "loop."
 
-Analyze the content and extract 2 clips that have the highest potential to go viral on TikTok, YouTube Shorts, or Instagram Reels.
+CRITICAL STRATEGY FOR STARTING AND ENDING POINTS:
+1. THE IN MEDIA RES START: Do not start at the beginning of a sentence. Start 0.5 seconds before a bombshell revelation, a "shock" word, or a mid-sentence peak ("...and that's when I realized everything was a lie").
+2. THE REACTION LEAD: If there is a sudden gasp, laugh, or visible shock, start the clip 0.2 seconds AFTER the facial change begins but BEFORE the explanation starts.
+3. THE PERFECT ENDING: The clip must end on a completed thought, a punchline, or a deliberate cliffhanger. Never cut off mid-sentence or mid-idea. End exactly after the final impactful word or reaction, before the energy drops or the speaker transitions to a boring topic.
+4. NO DEAD AIR: The first frame must contain high-energy audio. Zero silence allowed.
 
-For each clip, you MUST provide:
-1.  **start_time**: The exact start timestamp (MM:SS).
-2.  **end_time**: The exact end timestamp (MM:SS).
-3.  **virality_score**: A score from 0-100 indicating viral potential.
-4.  **title**: A catchy, click-baity title for the clip.
-5.  **reason**: A brief explanation of why this moment is viral (e.g., "High emotional impact", "Funny moment", "Insightful quote").
+DURATION STRATEGY:
+- 15–22s: For "Dopamine Hits" (Comedy/Quick Tips).
+- 30–45s: For "Story Loops" (Deep storytelling/Arguments).
+- 50–60s: For "Value Bombs" (Educational/Social Currency).
 
-**CRITICAL GUIDELINES:**
-*   Clips should be between 30 and 60 seconds long.
-*   Avoid clips with long silences or lack of context.
-*   Prioritize moments with strong hooks at the beginning.
+VIRALITY SCORE FORMULA (0-100):
+Score = (Hook Strength x 0.4) + (Emotional Arousal [Awe/Anger/Surprise] x 0.3) + (Relatability x 0.2) + (Loop Potential x 0.1).
 
-**OUTPUT FORMAT:**
-You must return a valid JSON array of objects. Do not include markdown formatting like ```json. Just the raw JSON.
-
-Example:
-[
-  {
-    "start_time": "04:20",
-    "end_time": "05:15",
-    "virality_score": 95,
-    "title": "The Secret to Success",
-    "reason": "Powerful motivational speech with a clear takeaway."
-  },
-  {
-    "start_time": "12:05",
-    "end_time": "12:45",
-    "virality_score": 88,
-    "title": "Unexpected Plot Twist",
-    "reason": "Shocking revelation that keeps viewers watching."
-  }
-]
+Analyze the content and extract exactly {num_clips} clips.
 """
 
 VISUAL_MOMENTS_PROMPT = """
-You are an expert viral content editor. I will provide you with 10 frames extracted from equal intervals of a video. 
-Your goal is to identify the most engaging, shareable, and high-retention segments based on these visuals.
+You are an expert Visual Content Strategist. Your goal is to identify {num_clips} segments from these frames that trigger a "Biological Response" (Shock, Satisfaction, or Curiosity).
 
-The video has no audio, so focus entirely on visual appeal, action, or interesting scenes.
+CRITICAL VISUAL STRATEGY:
+1. THE PATTERN INTERRUPT: Start the clip exactly at a moment of sudden motion, a dramatic camera zoom, or a "wrong/weird" visual that breaks the viewer's scrolling autopilot.
+2. THE "WTF" FRAME: The very first frame must be visually confusing or high-contrast to stop the thumb.
+3. THE ABRUPT PAYOFF: End the clip 0.5 seconds after the "visual climax" (the crash, the reveal, the laugh). Do not let the energy wind down, but NEVER cut off mid-idea or mid-sentence if there is dialogue. Ensure the visual and narrative thought is complete.
 
-For each chosen segment, you MUST provide:
-1.  **start_time**: The approximate start timestamp (MM:SS) based on the frame's position.
-2.  **end_time**: The approximate end timestamp (MM:SS) (aim for 30-60 seconds after the start).
-3.  **virality_score**: A score from 0-100 indicating viral potential.
-4.  **title**: A catchy title for the clip.
-5.  **reason**: Why this visual segment is viral.
+DURATION STRATEGY:
+- Aim for 12–25 seconds. Short, punchy, and high-speed.
 
-**CRITICAL GUIDELINES:**
-*   Generate exactly 2 clips.
-*   Clips should be between 20 and 30 seconds long.
-*   Prioritize visually striking moments.
+VIRALITY SCORE ESTIMATION:
+High Score (90+) = Sudden visual change + Universal relatability + Satisfying conclusion.
 
-**OUTPUT FORMAT:**
-You must return a valid JSON array of objects. Do not include markdown formatting like ```json. Just the raw JSON.
+Generate exactly {num_clips} clips based on visual peaks.
 """
 
 CAPTION_GENERATION_PROMPT = """

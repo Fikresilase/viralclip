@@ -4,7 +4,7 @@ import shutil
 import sys
 
 def build():
-    print("🚀 Starting build process for Mirage...")
+    print("🚀 Starting build process for ViralClip...")
 
     # Ensure we are in the project root
     project_root = os.path.dirname(os.path.abspath(__file__))
@@ -29,7 +29,7 @@ def build():
         "--onefile",
         "--add-data", f"bin{os.pathsep}bin",
         "--add-data", f"src{os.pathsep}src",
-        f"--name=Mirage",
+        f"--name=ViralClip",
     ]
     
     if os.path.exists(icon_path):
@@ -40,7 +40,7 @@ def build():
     print(f"📦 Running PyInstaller command: {' '.join(cmd)}")
     try:
         subprocess.run(cmd, check=True)
-        print("\n✅ Build complete! You can find Mirage.exe in the 'dist' folder.")
+        print("\n✅ Build complete! You can find ViralClip.exe in the 'dist' folder.")
     except subprocess.CalledProcessError as e:
         print(f"\n❌ Build failed with error code {e.returncode}")
 
@@ -50,8 +50,8 @@ if __name__ == "__main__":
         for folder in ["build", "dist"]:
             if os.path.exists(folder):
                 shutil.rmtree(folder)
-        if os.path.exists("Mirage.spec"):
-            os.remove("Mirage.spec")
+        if os.path.exists("ViralClip.spec"):
+            os.remove("ViralClip.spec")
         print("🧹 Cleanup complete.")
     else:
         build()
