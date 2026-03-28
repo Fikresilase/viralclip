@@ -347,6 +347,65 @@ class GeneratorWorker(QThread):
              self.log("Failed to extract audio. Falling back to visual analysis.")
              return 'visuals', self.source
 
+    def _process_chunk(self, i, chunk_data, context_type, total_chunks):
+        self.log(f"Analyzing chunk {i+1}/{total_chunks} with OpenAI...")
+        moments = []
+        
+        try:
+            response_text = ""
+            if context_type == 'text':
+                prompt = VIRAL_MOMENTS_PROMPT.format(num_clips=self.num_clips) + "\n\nTRANSCRIPT:\n" + chunk_data['content']
+                response_text = self._call_ai_text(prompt)
+            else:
+                # Audio analysis
+                self.log(f"Reading audio chunk {i+1} ({os.path.getsize(chunk_data['path'])/1024/1024:.2f} MB)...")
+                prompt = VIRAL_MOMENTS_PROMPT.format(num_clips=self.num_clips)
+                response_text = self._call_ai_with_audio(prompt, chunk_data['path'])
+                
+                # Cleanup
+                if os.path.exists(chunk_data['path']):
+                    os.remove(chunk_data['path'])
+
+            self.log(f"OpenAI Response received for chunk {i+1}.")
+            
+            # Parse JSON
+            try:
+                parsed_response = json.loads(response_text)
+                data = parsed_response.get("clips", [])
+            except json.JSONDecodeError as je:
+                self.log(f"JSON Parse Error. Error: {je}")
+                data = []
+            
+            self.log(f"Parsed {len(data)} moments from chunk {i+1}.")
+            
+            # Offset timestamps
+            chunk_start_sec = chunk_data['start_sec']
+            for item in data:
+                try:
+                    s_min, s_sec = map(int, item['start_time'].split(':'))
+                    e_min, e_sec = map(int, item['end_time'].split(':'))
+                except ValueError:
+                     self.log(f"Invalid timestamp format in response: {item}")
+                     continue
+                
+                rel_start = s_min * 60 + s_sec
+                rel_end = e_min * 60 + e_sec
+                
+                if context_type == 'audio':
+                    item['abs_start'] = chunk_start_sec + rel_start
+                    item['abs_end'] = chunk_start_sec + rel_end
+                else:
+                    # VTT timestamps usually absolute
+                    item['abs_start'] = rel_start
+                    item['abs_end'] = rel_end
+                    
+                moments.append(item)
+
+        except Exception as e:
+            self.log(f"Error analyzing chunk {i+1}: {e}")
+
+        return moments
+
     def _analyze_content(self, context_type, context_path):
         if context_type == 'visuals':
             return self._analyze_visuals(context_path)
@@ -362,59 +421,21 @@ class GeneratorWorker(QThread):
         self.log(f"Prepared {len(chunks)} chunks for analysis.")
 
         all_moments = []
-        for i, chunk_data in enumerate(chunks):
-            self.log(f"Analyzing chunk {i+1}/{len(chunks)} with OpenAI...")
+        total_chunks = len(chunks)
+        
+        # Process chunks concurrently with max 5 workers
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_chunk = {
+                executor.submit(self._process_chunk, i, chunk_data, context_type, total_chunks): i
+                for i, chunk_data in enumerate(chunks)
+            }
             
-            response_text = ""
-            try:
-                if context_type == 'text':
-                    prompt = VIRAL_MOMENTS_PROMPT.format(num_clips=self.num_clips) + "\n\nTRANSCRIPT:\n" + chunk_data['content']
-                    response_text = self._call_ai_text(prompt)
-                else:
-                    # Audio analysis
-                    self.log(f"Reading audio chunk {i+1} ({os.path.getsize(chunk_data['path'])/1024/1024:.2f} MB)...")
-                    prompt = VIRAL_MOMENTS_PROMPT.format(num_clips=self.num_clips)
-                    response_text = self._call_ai_with_audio(prompt, chunk_data['path'])
-                    
-                    # Cleanup
-                    if os.path.exists(chunk_data['path']):
-                        os.remove(chunk_data['path'])
-
-                self.log(f"OpenAI Response received for chunk {i+1}.")
-                # Parse JSON
+            for future in concurrent.futures.as_completed(future_to_chunk):
                 try:
-                    parsed_response = json.loads(response_text)
-                    data = parsed_response.get("clips", [])
-                except json.JSONDecodeError as je:
-                    self.log(f"JSON Parse Error. Error: {je}")
-                    data = []
-                self.log(f"Parsed {len(data)} moments from chunk {i+1}.")
-                
-                # Offset timestamps
-                chunk_start_sec = chunk_data['start_sec']
-                for item in data:
-                    try:
-                        s_min, s_sec = map(int, item['start_time'].split(':'))
-                        e_min, e_sec = map(int, item['end_time'].split(':'))
-                    except ValueError:
-                         self.log(f"Invalid timestamp format in response: {item}")
-                         continue
-                    
-                    rel_start = s_min * 60 + s_sec
-                    rel_end = e_min * 60 + e_sec
-                    
-                    if context_type == 'audio':
-                        item['abs_start'] = chunk_start_sec + rel_start
-                        item['abs_end'] = chunk_start_sec + rel_end
-                    else:
-                        # VTT timestamps usually absolute
-                        item['abs_start'] = rel_start
-                        item['abs_end'] = rel_end
-                        
-                    all_moments.append(item)
-
-            except Exception as e:
-                self.log(f"Error analyzing chunk {i}: {e}")
+                    moments = future.result()
+                    all_moments.extend(moments)
+                except Exception as e:
+                    self.log(f"Chunk processing failed: {e}")
 
         self.log(f"Total raw moments identified: {len(all_moments)}")
         return self._deduplicate(all_moments)
@@ -537,9 +558,37 @@ class GeneratorWorker(QThread):
         return chunks
 
     def _chunk_text_vtt(self, vtt_path):
+        """
+        Chunk VTT file by line count to strictly enforce AI token limits.
+        Chunks at ~10,000 lines (well under the 272k token limit) with a 
+        1,500 line overlap so context isn't lost at the seams.
+        """
         with open(vtt_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
-        return [{'content': "".join(lines), 'start_sec': 0, 'end_sec': 99999}]
+            
+        chunk_size = 10000
+        overlap = 1500
+        step = chunk_size - overlap
+        
+        chunks = []
+        start = 0
+        total_lines = len(lines)
+        
+        while start < total_lines:
+            end = min(start + chunk_size, total_lines)
+            chunk_content = "".join(lines[start:end])
+            
+            chunks.append({
+                'content': chunk_content,
+                'start_sec': 0, # Unused for text chunking, handled by LLM parsing
+                'end_sec': 99999
+            })
+            
+            if end == total_lines:
+                break
+            start += step
+            
+        return chunks
 
     def _process_clips(self, segments):
         processed = []
