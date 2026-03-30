@@ -226,27 +226,71 @@ class GeneratorWorker(QThread):
             ydl_opts['ffmpeg_location'] = self.ffmpeg_path
         
         has_subs = False
+        lang_to_download = 'en'
+        is_english = True
+        
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(self.source, download=False)
+                
+                # Get the default language of the video. Fallback to 'en' if not provided by YouTube.
+                vid_lang = info.get('language') or 'en'
+                # Sometimes language is "en-US", we just want the base language "en" for dictionary lookup
+                base_lang = vid_lang.split('-')[0]
+                
+                # Check manual subtitles
                 if 'subtitles' in info and info['subtitles']:
-                    self.log(f"Manual subtitles found: {list(info['subtitles'].keys())}")
+                    subs = info['subtitles']
+                    
+                    # Try to get the video's exact language first
+                    if vid_lang in subs:
+                        lang_to_download = vid_lang
+                    elif base_lang in subs:
+                        lang_to_download = base_lang
+                    # Fallback to English if original language isn't there
+                    elif 'en' in subs or 'en-US' in subs or 'en-GB' in subs:
+                        lang_to_download = 'en'
+                    # Ultimate fallback: just grab the first available
+                    else:
+                        lang_to_download = list(subs.keys())[0]
+                        
+                    is_english = lang_to_download.startswith('en')
+                    self.log(f"Manual subtitles found. Selected language: {lang_to_download} (Video original: {vid_lang})")
                     has_subs = True
+                    
+                # Fallback to automatic captions
                 elif 'automatic_captions' in info and info['automatic_captions']:
-                    self.log("Automatic captions found.")
+                    subs = info['automatic_captions']
+                    
+                    # Try to get the video's exact language first
+                    if vid_lang in subs:
+                        lang_to_download = vid_lang
+                    elif base_lang in subs:
+                        lang_to_download = base_lang
+                    # Fallback to English
+                    elif 'en' in subs or 'en-US' in subs or 'en-GB' in subs:
+                        lang_to_download = 'en'
+                    # Ultimate fallback: just grab the first available
+                    else:
+                        lang_to_download = list(subs.keys())[0]
+                        
+                    is_english = lang_to_download.startswith('en')
+                    self.log(f"Automatic captions found. Selected language: {lang_to_download} (Video original: {vid_lang})")
                     has_subs = True
         except Exception as e:
             self.log(f"Error checking subs: {e}")
+            
+        self.is_english_audio = is_english
 
         if has_subs:
-            self.log("Attempting to download subtitles (VTT)...")
+            self.log(f"Attempting to download subtitles (VTT) for language: {lang_to_download}...")
             vtt_path_template = os.path.join(self.output_dir, 'subs_%(id)s')
             ydl_opts = {
                 'skip_download': True,
                 'writesubtitles': True,
                 'writeautomaticsub': True,
                 'subtitlesformat': 'vtt',
-                'subtitleslangs': ['en'],
+                'subtitleslangs': [lang_to_download],
                 'outtmpl': vtt_path_template,
                 'quiet': True,
             }
@@ -273,12 +317,17 @@ class GeneratorWorker(QThread):
         # Fallback: Audio
         self.log("Downloading audio track for analysis (Audio-only)...")
         audio_path_template = os.path.join(self.output_dir, 'audio_%(id)s.%(ext)s')
+        
+        # We MUST ensure the postprocessor works by requiring ffmpeg
         ydl_opts = {
             'format': 'bestaudio/best',
-            'extract_audio': True,
-            'audio_format': 'mp3',
             'outtmpl': audio_path_template,
             'quiet': True,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
         }
         if self.ffmpeg_path:
             ydl_opts['ffmpeg_location'] = self.ffmpeg_path
@@ -286,35 +335,22 @@ class GeneratorWorker(QThread):
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(self.source, download=True)
-                path = ydl.prepare_filename(info).rsplit('.', 1)[0] + '.mp3'
-                if os.path.exists(path) and os.path.getsize(path) > 1024: # Check if > 1KB
-                    self.log(f"Audio downloaded to: {path}")
-                    return 'audio', path
+                # After extraction, yt-dlp appends the new extension
+                path = ydl.prepare_filename(info)
+                # Strip the original extension and add .mp3
+                base_path = os.path.splitext(path)[0]
+                mp3_path = base_path + '.mp3'
+                
+                if os.path.exists(mp3_path) and os.path.getsize(mp3_path) > 1024:
+                    self.log(f"Audio downloaded to: {mp3_path}")
+                    return 'audio', mp3_path
                 self.log("Audio file seems invalid or missing.")
         except Exception as e:
             self.log(f"Audio download failed: {e}")
-
-        # Fallback to visual
-        self.log("Switching to visual analysis (downloading video)...")
-        video_path_template = os.path.join(self.output_dir, 'video_%(id)s.%(ext)s')
-        ydl_opts_video = {
-            'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
-            'outtmpl': video_path_template,
-            'quiet': True,
-        }
-        if self.ffmpeg_path:
-             ydl_opts_video['ffmpeg_location'] = self.ffmpeg_path
-        
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts_video) as ydl:
-                 info = ydl.extract_info(self.source, download=True)
-                 path = ydl.prepare_filename(info)
-                 self.log(f"Video downloaded for visual analysis: {path}")
-                 self.is_local = True
-                 self.source = path
-                 return 'visuals', path
-        except Exception as e:
-            raise Exception(f"Failed to download video for visual analysis: {e}")
+            
+        # Fallback to visual (YouTube specific)
+        self.log("Switching to visual analysis (will download small chunks instead of full video)...")
+        return 'youtube_visuals', self.source
 
     def _get_local_context(self):
         self.log(f"Inspecting local file: {self.source}")
@@ -409,6 +445,8 @@ class GeneratorWorker(QThread):
     def _analyze_content(self, context_type, context_path):
         if context_type == 'visuals':
             return self._analyze_visuals(context_path)
+        if context_type == 'youtube_visuals':
+            return self._analyze_youtube_visuals(context_path)
 
         chunks = []
         if context_type == 'text':
@@ -439,6 +477,130 @@ class GeneratorWorker(QThread):
 
         self.log(f"Total raw moments identified: {len(all_moments)}")
         return self._deduplicate(all_moments)
+
+    def _analyze_youtube_visuals(self, source_url):
+        self.log("Starting YouTube visual analysis (chunked downloading)...")
+        
+        # Get duration first without downloading the video
+        ydl_opts = {'quiet': True}
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(source_url, download=False)
+                duration = info.get('duration', 0)
+        except Exception as e:
+            self.log(f"Failed to get video info for visuals: {e}")
+            return []
+            
+        if duration <= 0:
+            self.log("Invalid video duration for visual analysis.")
+            return []
+            
+        self.log(f"Video duration: {timedelta(seconds=duration)}")
+        
+        num_parts = 10
+        interval = duration / num_parts
+        frames = []
+        
+        self.log(f"Extracting {num_parts} frames by downloading 2-second chunks...")
+        
+        # For each part, download a tiny chunk and extract a frame
+        for i in range(num_parts):
+            t = (i * interval) + (interval / 2)
+            start_t = max(0, t - 1)
+            end_t = min(duration, t + 1)
+            
+            temp_chunk_path = os.path.join(self.output_dir, f"temp_vis_chunk_{i}.mp4")
+            frame_path = os.path.join(self.output_dir, f"frame_{i}.jpg")
+            
+            # Download just the 2-second chunk
+            ydl_opts_dl = {
+                'download_ranges': lambda _, __: [{'start_time': start_t, 'end_time': end_t}],
+                'format': 'bestvideo[height<=720][ext=mp4]/best[height<=720]', # lower res is fine for AI vision
+                'outtmpl': temp_chunk_path,
+                'quiet': True,
+                'force_keyframes_at_cuts': True,
+            }
+            if self.ffmpeg_path:
+                ydl_opts_dl['ffmpeg_location'] = self.ffmpeg_path
+                
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts_dl) as ydl:
+                    ydl.download([source_url])
+                    
+                if os.path.exists(temp_chunk_path):
+                    # Extract frame from the middle of the downloaded chunk
+                    cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
+                    cmd = [
+                        cmd_exe, '-y',
+                        '-i', temp_chunk_path,
+                        '-vframes', '1',
+                        '-q:v', '2',
+                        frame_path
+                    ]
+                    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
+                    if os.path.exists(frame_path):
+                        frames.append({'path': frame_path, 'time': t})
+                        
+                    # Cleanup temp chunk
+                    os.remove(temp_chunk_path)
+            except Exception as e:
+                self.log(f"Failed to process visual chunk {i}: {e}")
+                
+        if not frames:
+            self.log("No frames could be extracted for visual analysis.")
+            return []
+            
+        self.log(f"Extracted {len(frames)} frames. Preparing for OpenAI...")
+        
+        # Send to AI
+        frame_paths = [f['path'] for f in frames]
+        try:
+            self.log(f"Sending prompt to OpenAI...")
+            prompt = VISUAL_MOMENTS_PROMPT.format(num_clips=self.num_clips)
+            response_text = self._call_ai_with_images(prompt, frame_paths)
+            self.log(f"OpenAI response received.")
+            
+            # Cleanup local frames
+            for f in frames:
+                if os.path.exists(f['path']):
+                    os.remove(f['path'])
+
+            # Parse JSON
+            try:
+                parsed_response = json.loads(response_text)
+                data = parsed_response.get("clips", [])
+            except json.JSONDecodeError as je:
+                self.log(f"JSON Parse Error. Error: {je}")
+                data = []
+
+            self.log(f"Parsed {len(data)} moments from visual analysis.")
+            
+            final_moments = []
+            for item in data:
+                try:
+                    s_min, s_sec = map(int, item['start_time'].split(':'))
+                    e_min, e_sec = map(int, item['end_time'].split(':'))
+                    
+                    abs_start = s_min * 60 + s_sec
+                    abs_end = e_min * 60 + e_sec
+                    
+                    if abs_start >= abs_end:
+                         continue
+
+                    item['abs_start'] = abs_start
+                    item['abs_end'] = abs_end
+                    final_moments.append(item)
+                except Exception as e:
+                    self.log(f"Error parsing timestamp {item}: {e}")
+
+            return self._deduplicate(final_moments)
+            
+        except Exception as e:
+            self.log(f"Error in visual analysis: {e}")
+            import traceback
+            self.log(traceback.format_exc())
+            return []
 
     def _analyze_visuals(self, video_path):
         self.log("Starting visual analysis...")
@@ -527,47 +689,63 @@ class GeneratorWorker(QThread):
         duration = self._get_duration(audio_path)
         self.log(f"Audio duration: {timedelta(seconds=duration)}")
         
-        chunk_size = 30 * 60
-        overlap = 10 * 60
-        step = chunk_size - overlap
-        
+        overlap = 2 * 60
         chunks = []
         start = 0
+        
         while start < duration:
-            end = min(start + chunk_size, duration)
+            # Start with 20 minute blocks
+            current_chunk_size = 20 * 60
+            end = min(start + current_chunk_size, duration)
             
             chunk_file = f"{audio_path}_chunk_{start}.mp3"
-            cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
-            cmd = [
-                cmd_exe, '-y', '-i', audio_path,
-                '-ss', str(start), '-to', str(end),
-                '-c', 'copy', chunk_file
-            ]
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
+            while True:
+                cmd_exe = self.ffmpeg_path if self.ffmpeg_path else 'ffmpeg'
+                cmd = [
+                    cmd_exe, '-y', '-i', audio_path,
+                    '-ss', str(start), '-to', str(end),
+                    '-c', 'copy', chunk_file
+                ]
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                
+                # Check if it fits OpenAI's 25MB limit (leaving a small buffer of 2MB, so <= 23MB)
+                size_mb = os.path.getsize(chunk_file) / (1024 * 1024)
+                if size_mb <= 23.0 or (end - start) <= 4 * 60:
+                    break
+                else:
+                    self.log(f"Chunk from {start}s to {end}s is {size_mb:.2f}MB (>23MB). Stripping 4 mins...")
+                    # Remove the oversized chunk
+                    os.remove(chunk_file)
+                    # Strip by 4 minutes
+                    end -= 4 * 60
+                    # Ensure we don't shrink it so much that it's smaller than the overlap
+                    if end <= start + overlap:
+                        end = start + overlap + 60  # At least 1 min beyond overlap
+                        
             chunks.append({
                 'path': chunk_file,
                 'start_sec': start,
                 'end_sec': end
             })
             
-            if end == duration:
+            if end >= duration:
                 break
-            start += step
+                
+            start = end - overlap
             
         return chunks
 
     def _chunk_text_vtt(self, vtt_path):
         """
-        Chunk VTT file by line count to strictly enforce AI token limits.
-        Chunks at ~10,000 lines (well under the 272k token limit) with a 
-        1,500 line overlap so context isn't lost at the seams.
+        Chunk VTT file by line count to roughly match 20-minute windows.
+        (Usually ~2000 lines = 20 minutes), with 200 line overlap.
         """
         with open(vtt_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
             
-        chunk_size = 10000
-        overlap = 1500
+        chunk_size = 2000
+        overlap = 200
         step = chunk_size - overlap
         
         chunks = []
@@ -680,13 +858,26 @@ class GeneratorWorker(QThread):
                 with self.caption_semaphore:
                     self.log(f"  Clip {i+1}: Starting caption generation in background...")
                     caption_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-                    caption_future = caption_executor.submit(
-                        self._generate_captions_from_clip,
-                        i,
-                        temp_raw_path,
-                        start,
-                        end
-                    )
+                    
+                    if getattr(self, 'is_english_audio', True):
+                        self.log(f"  Clip {i+1}: Using Whisper AI for karaoke English captions.")
+                        caption_future = caption_executor.submit(
+                            self._generate_captions_from_clip,
+                            i,
+                            temp_raw_path,
+                            start,
+                            end
+                        )
+                    else:
+                        self.log(f"  Clip {i+1}: Non-English detected. Using VTT extraction for standard captions.")
+                        caption_future = caption_executor.submit(
+                            self._generate_captions_for_clip,
+                            i,
+                            start,
+                            end,
+                            self.context_type,
+                            self.context_path
+                        )
 
             # 2. Face Tracking & Cropping
             self.log(f"  Clip {i+1}: Running Face Tracking...")
@@ -1073,7 +1264,7 @@ class GeneratorWorker(QThread):
             "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
             # PrimaryColour = white (before spoken), SecondaryColour = yellow (fill color for \\k)
             # OutlineColour = black, thick outline (4px), no shadow, bold, centered bottom
-            "Style: Main,Arial Black,68,&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,1.5,2,50,50,120,1",
+            "Style: Main,Arial Black,102,&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,1.5,2,50,50,250,1",
             "",
             "[Events]",
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
@@ -1513,15 +1704,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         """Return ffmpeg drawtext filter for a moving transparent watermark."""
         # Fast diagonal bounce: text drifts across the screen and bounces off edges
         # Speed: 150px/s horizontal, 90px/s vertical (5x speed)
-        # Opacity: 60% white — clearly visible bold watermark
+        # Opacity: 70% white — clearly visible watermark
         # Using a literal newline character for multiline support
         watermark = (
-            "drawtext=text='made with\n"
-            "ViralClip'"
-            ":fontsize=80"
-            ":fontcolor=white@0.60"
+            "drawtext=text='clipped with\n"
+            "viralclip.company'"
+            ":fontsize=64"
+            ":fontcolor=white@0.65"
             ":font='Arial Black'"
-            ":line_spacing=15"
+            ":line_spacing=12"
             ":x='abs(mod(t*150\\,2*(w-tw))-(w-tw))'"
             ":y='abs(mod(t*90\\,2*(h-th))-(h-th))'"
         )
@@ -1588,9 +1779,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     srt_path_escaped = subtitle_path.replace('\\', '/').replace(':', '\\:')
                     subtitle_filter = (
                         f"subtitles='{srt_path_escaped}':force_style='"
-                        "FontName=Arial Black,FontSize=24,PrimaryColour=&H00FFFFFF,"
+                        "FontName=Arial Black,FontSize=36,PrimaryColour=&H00FFFFFF,"
                         "OutlineColour=&H00000000,Outline=3,Bold=1,"
-                        "Alignment=2,MarginV=80'"
+                        "Alignment=2,MarginV=180'"
                     )
             
             # Chain subtitle filter with watermark filter
