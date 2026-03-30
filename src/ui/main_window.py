@@ -495,6 +495,9 @@ class ResultItem(QFrame):
         self.data = data
         self.is_placeholder = is_placeholder
         
+        # Enforce fixed sizing to ensure FlowLayout works correctly
+        self.setFixedSize(184, 380)
+        
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         
@@ -1235,6 +1238,9 @@ class MainWindow(QMainWindow):
             card = ResultItem(placeholder_data, self, is_placeholder=True)
             self.results_grid.addWidget(card)
             self.placeholder_cards.append(card)
+        
+        # Recalculate grid height after all placeholder cards added
+        QTimer.singleShot(0, self._update_results_height)
     
     def on_clip_progress(self, clip_index, percentage, status_text):
         """Update progress for a specific clip"""
@@ -1245,6 +1251,22 @@ class MainWindow(QMainWindow):
         """Convert placeholder to final card when clip completes"""
         if 0 <= clip_index < len(self.placeholder_cards):
             self.placeholder_cards[clip_index].convert_to_final(result_data)
+            # Recalculate height in case card dimensions changed
+            QTimer.singleShot(0, self._update_results_height)
+    
+    def _update_results_height(self):
+        """Recalculate and set minimum height for the results grid to ensure scrollability."""
+        count = self.results_grid.count()
+        if count > 0:
+            width = self.results_grid_widget.width()
+            if width <= 0:
+                # Widget not yet laid out — estimate available width
+                width = min(850, self.width()) - 88
+            height = self.results_grid.heightForWidth(width)
+            self.results_grid_widget.setMinimumHeight(height)
+            self.results_grid_widget.updateGeometry()
+        else:
+            self.results_grid_widget.setMinimumHeight(0)
     
     def clear_results_grid(self):
         """Clear all items from results grid and delete associated files"""
@@ -1283,6 +1305,7 @@ class MainWindow(QMainWindow):
         
         # Show empty state when grid is cleared
         self.empty_state.setVisible(self.results_grid.count() == 0)
+        self.results_grid_widget.setMinimumHeight(0)
 
     def on_generate_finished(self, results):
         # All clips are done - nothing special to do since cards already converted individually
@@ -1300,3 +1323,9 @@ class MainWindow(QMainWindow):
         self.clear_results_grid()
         self.heading_widget.setVisible(True)
         self.main_stack.setCurrentIndex(0)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Recalculate results grid height when window is resized
+        if self.main_stack.currentIndex() == 1:
+            QTimer.singleShot(0, self._update_results_height)

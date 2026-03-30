@@ -72,18 +72,24 @@ class FlowLayout(QLayout):
             wid = item.widget()
             spaceX = self.m_hSpace
             spaceY = self.m_vSpace
-            nextX = x + item.sizeHint().width() + spaceX
+            itemSize = item.sizeHint()
+            if itemSize.width() <= 0:
+                itemSize = item.minimumSize()
+            if itemSize.width() <= 0:
+                itemSize = wid.size()
+
+            nextX = x + itemSize.width() + spaceX
             if nextX - spaceX > rect.right() and lineHeight > 0:
                 x = rect.x()
                 y = y + lineHeight + spaceY
-                nextX = x + item.sizeHint().width() + spaceX
+                nextX = x + itemSize.width() + spaceX
                 lineHeight = 0
 
             if not testOnly:
-                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+                item.setGeometry(QRect(QPoint(x, y), itemSize))
 
             x = nextX
-            lineHeight = max(lineHeight, item.sizeHint().height())
+            lineHeight = max(lineHeight, itemSize.height())
 
         return y + lineHeight - rect.y()
 
