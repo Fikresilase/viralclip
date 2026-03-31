@@ -570,7 +570,7 @@ class ResultItem(QFrame):
         title_lbl.setMaximumHeight(50)  # Fixed height for title
         title_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         
-        score_lbl = QLabel(f"⭐ {score}/10")
+        score_lbl = QLabel(f"⭐ {score}/100")
         score_lbl.setStyleSheet("background-color: transparent; color: #60A5FA; font-size: 12px; font-weight: 700;")
         score_lbl.setFixedHeight(20)
         
@@ -658,7 +658,7 @@ class ResultItem(QFrame):
         title_lbl.setMaximumHeight(50)  # Fixed height for title
         title_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         
-        score_lbl = QLabel(f"⭐ {score}/10")
+        score_lbl = QLabel(f"⭐ {score}/100")
         score_lbl.setStyleSheet("background-color: transparent; color: #60A5FA; font-size: 12px; font-weight: 700;")
         score_lbl.setFixedHeight(20)
         
