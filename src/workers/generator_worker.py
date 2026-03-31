@@ -17,7 +17,7 @@ from openai import OpenAI
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
-from src.prompts import VIRAL_MOMENTS_PROMPT, VISUAL_MOMENTS_PROMPT
+from src.prompts import VIRAL_MOMENTS_PROMPT, VISUAL_MOMENTS_PROMPT, CAPTION_GENERATION_PROMPT
 from src.core.face_tracker import FaceTracker
 from src.utils.storage import StorageManager
 
@@ -94,36 +94,39 @@ class GeneratorWorker(QThread):
         self.progress.emit(message)
         print(f"[GeneratorWorker] {message}")
     
-    def _call_ai_text(self, prompt: str) -> str:
+    def _call_ai_text(self, prompt: str, model: str = "gpt-5-mini") -> str:
         """Call AI with text prompt, returns JSON text response via parsed model"""
         response = self.openai_client.beta.chat.completions.parse(
-            model="gpt-5-mini",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
-            response_format=ViralMomentsResponse
+            response_format=ViralMomentsResponse,
+            timeout=120.0
         )
         # Convert structured parsed object back to JSON text so our existing code works
         return response.choices[0].message.parsed.model_dump_json()
     
-    def _call_ai_with_audio(self, prompt: str, audio_path: str) -> str:
-        """Call AI with audio file: transcribe with whisper-1, then analyze with gpt-5-mini"""
+    def _call_ai_with_audio(self, prompt: str, audio_path: str, model: str = "gpt-5-mini") -> str:
+        """Call AI with audio file: transcribe with whisper-1, then analyze"""
         # First transcribe with whisper-1
         with open(audio_path, 'rb') as f:
             transcript = self.openai_client.audio.transcriptions.create(
                 model="whisper-1",
                 file=f,
-                response_format="text"
+                response_format="text",
+                timeout=120.0
             )
         
-        # Then analyze the transcript with gpt-5-mini using structured parsing
+        # Then analyze the transcript using structured parsing
         full_prompt = f"{prompt}\n\nTRANSCRIPT:\n{transcript}"
         response = self.openai_client.beta.chat.completions.parse(
-            model="gpt-5-mini",
+            model=model,
             messages=[{"role": "user", "content": full_prompt}],
-            response_format=ViralMomentsResponse
+            response_format=ViralMomentsResponse,
+            timeout=120.0
         )
         return response.choices[0].message.parsed.model_dump_json()
     
-    def _call_ai_with_images(self, prompt: str, image_paths: list) -> str:
+    def _call_ai_with_images(self, prompt: str, image_paths: list, model: str = "gpt-5-mini") -> str:
         """Call AI with multiple images, returns JSON text response via parsed model"""
         # Build messages with base64 encoded images
         content = [{"type": "text", "text": prompt}]
@@ -142,9 +145,10 @@ class GeneratorWorker(QThread):
             })
         
         response = self.openai_client.beta.chat.completions.parse(
-            model="gpt-5-mini",
+            model=model,
             messages=[{"role": "user", "content": content}],
-            response_format=ViralMomentsResponse
+            response_format=ViralMomentsResponse,
+            timeout=120.0
         )
         return response.choices[0].message.parsed.model_dump_json()
 
@@ -227,11 +231,21 @@ class GeneratorWorker(QThread):
         
         has_subs = False
         lang_to_download = 'en'
-        is_english = True
+        is_supported_whisper_lang = True
         
+        # The 20 languages where we explicitly prefer Whisper word-level timestamps over standard VTT
+        # Codes are base ISO 639-1 mostly, including typical YouTube variants for Chinese.
+        WHISPER_SUPPORTED_CODES = {
+            'en', 'es', 'hi', 'pt', 'ru', 'ja', 'ko', 'fr', 'ar', 'de', 
+            'vi', 'tr', 'th', 'zh', 'zh-hans', 'zh-hant', 'zh-cn', 'zh-tw', 'zh-hk',
+            'bn', 'it', 'ur', 'pl', 'ta'
+        }
+        
+        video_duration = 0
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(self.source, download=False)
+                video_duration = info.get('duration', 0)
                 
                 # Get the default language of the video. Fallback to 'en' if not provided by YouTube.
                 vid_lang = info.get('language') or 'en'
@@ -254,7 +268,7 @@ class GeneratorWorker(QThread):
                     else:
                         lang_to_download = list(subs.keys())[0]
                         
-                    is_english = lang_to_download.startswith('en')
+                    is_supported_whisper_lang = lang_to_download.lower() in WHISPER_SUPPORTED_CODES or base_lang.lower() in WHISPER_SUPPORTED_CODES
                     self.log(f"Manual subtitles found. Selected language: {lang_to_download} (Video original: {vid_lang})")
                     has_subs = True
                     
@@ -274,13 +288,13 @@ class GeneratorWorker(QThread):
                     else:
                         lang_to_download = list(subs.keys())[0]
                         
-                    is_english = lang_to_download.startswith('en')
+                    is_supported_whisper_lang = lang_to_download.lower() in WHISPER_SUPPORTED_CODES or base_lang.lower() in WHISPER_SUPPORTED_CODES
                     self.log(f"Automatic captions found. Selected language: {lang_to_download} (Video original: {vid_lang})")
                     has_subs = True
         except Exception as e:
             self.log(f"Error checking subs: {e}")
             
-        self.is_english_audio = is_english
+        self.is_supported_whisper_lang = is_supported_whisper_lang
 
         if has_subs:
             self.log(f"Attempting to download subtitles (VTT) for language: {lang_to_download}...")
@@ -313,6 +327,11 @@ class GeneratorWorker(QThread):
                 self.log(f"Failed to download subs: {e}")
 
             self.log("Could not verify downloaded VTT file. Switching to audio fallback.")
+
+        # Check duration before Audio fallback
+        if video_duration > 1800:
+            self.log("Video is over 30 minutes long. Skipping audio analysis. Falling back to visual analysis.")
+            return 'youtube_visuals', self.source
 
         # Fallback: Audio
         self.log("Downloading audio track for analysis (Audio-only)...")
@@ -356,6 +375,11 @@ class GeneratorWorker(QThread):
         self.log(f"Inspecting local file: {self.source}")
         base, _ = os.path.splitext(self.source)
         
+        # Local files default to Whisper since we assume they might be in a supported language,
+        # unless user manually selected a sidecar VTT which is a special case we could detect here, 
+        # but defaulting to Whisper for local audio/video is safest.
+        self.is_supported_whisper_lang = True
+        
         # Check sidecar files
         if os.path.exists(base + '.srt'):
             self.log(f"Found sidecar SRT: {base}.srt")
@@ -363,6 +387,11 @@ class GeneratorWorker(QThread):
         if os.path.exists(base + '.vtt'):
             self.log(f"Found sidecar VTT: {base}.vtt")
             return 'text', base + '.vtt'
+            
+        video_duration = self._get_duration(self.source)
+        if video_duration > 1800:
+            self.log("Local video is over 30 minutes long. Skipping audio analysis. Falling back to visual analysis.")
+            return 'visuals', self.source
             
         self.log("No sidecar subtitles. Extracting audio from video...")
         audio_path = os.path.join(self.output_dir, "local_audio.mp3")
@@ -383,62 +412,92 @@ class GeneratorWorker(QThread):
              self.log("Failed to extract audio. Falling back to visual analysis.")
              return 'visuals', self.source
 
+    def _parse_time(self, ts):
+        ts = str(ts).split('.')[0].split(',')[0]
+        parts = list(map(int, ts.split(':')))
+        if len(parts) == 3:
+            return parts[0] * 3600 + parts[1] * 60 + parts[2]
+        elif len(parts) == 2:
+            return parts[0] * 60 + parts[1]
+        elif len(parts) == 1:
+            return parts[0]
+        else:
+            raise ValueError(f"Invalid timestamp format: {ts}")
+
     def _process_chunk(self, i, chunk_data, context_type, total_chunks):
         self.log(f"Analyzing chunk {i+1}/{total_chunks} with OpenAI...")
         moments = []
         
-        try:
-            response_text = ""
+        # Calculate how many clips to request per chunk.
+        # We want slightly more than proportional to ensure we get enough total clips
+        # after deduplication, but not 15 per chunk if we have many chunks.
+        clips_per_chunk = self.num_clips if total_chunks == 1 else max(3, int((self.num_clips * 1.5) / total_chunks) + 1)
+        
+        response_text = ""
+        success = False
+        
+        def attempt_analysis(model_name):
             if context_type == 'text':
-                prompt = VIRAL_MOMENTS_PROMPT.format(num_clips=self.num_clips) + "\n\nTRANSCRIPT:\n" + chunk_data['content']
-                response_text = self._call_ai_text(prompt)
+                prompt = VIRAL_MOMENTS_PROMPT.format(num_clips=clips_per_chunk) + "\n\nTRANSCRIPT:\n" + chunk_data['content']
+                return self._call_ai_text(prompt, model=model_name)
             else:
-                # Audio analysis
                 self.log(f"Reading audio chunk {i+1} ({os.path.getsize(chunk_data['path'])/1024/1024:.2f} MB)...")
-                prompt = VIRAL_MOMENTS_PROMPT.format(num_clips=self.num_clips)
-                response_text = self._call_ai_with_audio(prompt, chunk_data['path'])
-                
-                # Cleanup
-                if os.path.exists(chunk_data['path']):
-                    os.remove(chunk_data['path'])
+                prompt = VIRAL_MOMENTS_PROMPT.format(num_clips=clips_per_chunk)
+                return self._call_ai_with_audio(prompt, chunk_data['path'], model=model_name)
 
-            self.log(f"OpenAI Response received for chunk {i+1}.")
-            
-            # Parse JSON
-            try:
-                parsed_response = json.loads(response_text)
-                data = parsed_response.get("clips", [])
-            except json.JSONDecodeError as je:
-                self.log(f"JSON Parse Error. Error: {je}")
-                data = []
-            
-            self.log(f"Parsed {len(data)} moments from chunk {i+1}.")
-            
-            # Offset timestamps
-            chunk_start_sec = chunk_data['start_sec']
-            for item in data:
-                try:
-                    s_min, s_sec = map(int, item['start_time'].split(':'))
-                    e_min, e_sec = map(int, item['end_time'].split(':'))
-                except ValueError:
-                     self.log(f"Invalid timestamp format in response: {item}")
-                     continue
-                
-                rel_start = s_min * 60 + s_sec
-                rel_end = e_min * 60 + e_sec
-                
-                if context_type == 'audio':
-                    item['abs_start'] = chunk_start_sec + rel_start
-                    item['abs_end'] = chunk_start_sec + rel_end
-                else:
-                    # VTT timestamps usually absolute
-                    item['abs_start'] = rel_start
-                    item['abs_end'] = rel_end
-                    
-                moments.append(item)
-
+        try:
+            self.log(f"Chunk {i+1}: Attempting analysis with gpt-5-mini (120s timeout)...")
+            response_text = attempt_analysis("gpt-5-mini")
+            success = True
         except Exception as e:
-            self.log(f"Error analyzing chunk {i+1}: {e}")
+            self.log(f"Chunk {i+1}: Primary attempt failed ({e}). Retrying with gpt-4o-mini...")
+            try:
+                response_text = attempt_analysis("gpt-4o-mini")
+                success = True
+            except Exception as e2:
+                self.log(f"Chunk {i+1}: Retry failed ({e2}). Moving on without this chunk.")
+
+        # Cleanup audio chunk
+        if context_type != 'text' and 'path' in chunk_data and os.path.exists(chunk_data['path']):
+            try:
+                os.remove(chunk_data['path'])
+            except Exception as e:
+                pass
+
+        if not success:
+            return []
+
+        self.log(f"OpenAI Response received for chunk {i+1}.")
+        
+        # Parse JSON
+        try:
+            parsed_response = json.loads(response_text)
+            data = parsed_response.get("clips", [])
+        except json.JSONDecodeError as je:
+            self.log(f"JSON Parse Error. Error: {je}")
+            data = []
+        
+        self.log(f"Parsed {len(data)} moments from chunk {i+1}.")
+        
+        # Offset timestamps
+        chunk_start_sec = chunk_data['start_sec']
+        for item in data:
+            try:
+                rel_start = self._parse_time(item['start_time'])
+                rel_end = self._parse_time(item['end_time'])
+            except Exception as e:
+                 self.log(f"Invalid timestamp format in response: {item} - Error: {e}")
+                 continue
+            
+            if context_type == 'audio':
+                item['abs_start'] = chunk_start_sec + rel_start
+                item['abs_end'] = chunk_start_sec + rel_end
+            else:
+                # VTT timestamps usually absolute
+                item['abs_start'] = rel_start
+                item['abs_end'] = rel_end
+                
+            moments.append(item)
 
         return moments
 
@@ -468,12 +527,16 @@ class GeneratorWorker(QThread):
                 for i, chunk_data in enumerate(chunks)
             }
             
+            completed_chunks = 0
             for future in concurrent.futures.as_completed(future_to_chunk):
+                completed_chunks += 1
+                chunk_index = future_to_chunk[future]
+                self.log(f"Completed processing for chunk {chunk_index+1} ({completed_chunks}/{total_chunks} total completed).")
                 try:
                     moments = future.result()
                     all_moments.extend(moments)
                 except Exception as e:
-                    self.log(f"Chunk processing failed: {e}")
+                    self.log(f"Chunk processing failed unexpectedly: {e}")
 
         self.log(f"Total raw moments identified: {len(all_moments)}")
         return self._deduplicate(all_moments)
@@ -555,53 +618,58 @@ class GeneratorWorker(QThread):
         
         # Send to AI
         frame_paths = [f['path'] for f in frames]
+        response_text = ""
+        success = False
         try:
-            self.log(f"Sending prompt to OpenAI...")
+            self.log(f"Sending prompt to OpenAI (gpt-5-mini, 120s timeout)...")
             prompt = VISUAL_MOMENTS_PROMPT.format(num_clips=self.num_clips)
-            response_text = self._call_ai_with_images(prompt, frame_paths)
-            self.log(f"OpenAI response received.")
-            
-            # Cleanup local frames
-            for f in frames:
-                if os.path.exists(f['path']):
-                    os.remove(f['path'])
-
-            # Parse JSON
-            try:
-                parsed_response = json.loads(response_text)
-                data = parsed_response.get("clips", [])
-            except json.JSONDecodeError as je:
-                self.log(f"JSON Parse Error. Error: {je}")
-                data = []
-
-            self.log(f"Parsed {len(data)} moments from visual analysis.")
-            
-            final_moments = []
-            for item in data:
-                try:
-                    s_min, s_sec = map(int, item['start_time'].split(':'))
-                    e_min, e_sec = map(int, item['end_time'].split(':'))
-                    
-                    abs_start = s_min * 60 + s_sec
-                    abs_end = e_min * 60 + e_sec
-                    
-                    if abs_start >= abs_end:
-                         continue
-
-                    item['abs_start'] = abs_start
-                    item['abs_end'] = abs_end
-                    final_moments.append(item)
-                except Exception as e:
-                    self.log(f"Error parsing timestamp {item}: {e}")
-
-            return self._deduplicate(final_moments)
-            
+            response_text = self._call_ai_with_images(prompt, frame_paths, model="gpt-5-mini")
+            success = True
         except Exception as e:
-            self.log(f"Error in visual analysis: {e}")
-            import traceback
-            self.log(traceback.format_exc())
-            return []
+            self.log(f"Primary visual attempt failed ({e}). Retrying with gpt-4o-mini...")
+            try:
+                response_text = self._call_ai_with_images(prompt, frame_paths, model="gpt-4o-mini")
+                success = True
+            except Exception as e2:
+                self.log(f"Visual retry failed ({e2}). Moving on.")
+                
+        # Cleanup local frames
+        for f in frames:
+            if os.path.exists(f['path']):
+                os.remove(f['path'])
 
+        if not success:
+            return []
+            
+        self.log(f"OpenAI response received.")
+        
+        # Parse JSON
+        try:
+            parsed_response = json.loads(response_text)
+            data = parsed_response.get("clips", [])
+        except json.JSONDecodeError as je:
+            self.log(f"JSON Parse Error. Error: {je}")
+            data = []
+
+        self.log(f"Parsed {len(data)} moments from visual analysis.")
+            
+        final_moments = []
+        for item in data:
+            try:
+                abs_start = self._parse_time(item['start_time'])
+                abs_end = self._parse_time(item['end_time'])
+                
+                if abs_start >= abs_end:
+                     continue
+
+                item['abs_start'] = abs_start
+                item['abs_end'] = abs_end
+                final_moments.append(item)
+            except Exception as e:
+                self.log(f"Error parsing timestamp {item}: {e}")
+
+        return self._deduplicate(final_moments)
+            
     def _analyze_visuals(self, video_path):
         self.log("Starting visual analysis...")
         duration = self._get_duration(video_path)
@@ -638,53 +706,58 @@ class GeneratorWorker(QThread):
         # Collect frame paths for AI call
         frame_paths = [f['path'] for f in frames]
         
+        response_text = ""
+        success = False
         try:
-            self.log(f"Sending prompt to OpenAI...")
+            self.log(f"Sending prompt to OpenAI (gpt-5-mini, 120s timeout)...")
             prompt = VISUAL_MOMENTS_PROMPT.format(num_clips=self.num_clips)
-            response_text = self._call_ai_with_images(prompt, frame_paths)
-            self.log(f"OpenAI response received.")
-            
-            # Cleanup local frames
-            for f in frames:
-                if os.path.exists(f['path']):
-                    os.remove(f['path'])
-
-            # Parse JSON
-            try:
-                parsed_response = json.loads(response_text)
-                data = parsed_response.get("clips", [])
-            except json.JSONDecodeError as je:
-                self.log(f"JSON Parse Error. Error: {je}")
-                data = []
-
-            self.log(f"Parsed {len(data)} moments from visual analysis.")
-            
-            final_moments = []
-            for item in data:
-                try:
-                    s_min, s_sec = map(int, item['start_time'].split(':'))
-                    e_min, e_sec = map(int, item['end_time'].split(':'))
-                    
-                    abs_start = s_min * 60 + s_sec
-                    abs_end = e_min * 60 + e_sec
-                    
-                    if abs_start >= abs_end:
-                         continue
-
-                    item['abs_start'] = abs_start
-                    item['abs_end'] = abs_end
-                    final_moments.append(item)
-                except Exception as e:
-                    self.log(f"Error parsing timestamp {item}: {e}")
-
-            return self._deduplicate(final_moments)
-            
+            response_text = self._call_ai_with_images(prompt, frame_paths, model="gpt-5-mini")
+            success = True
         except Exception as e:
-            self.log(f"Error in visual analysis: {e}")
-            import traceback
-            self.log(traceback.format_exc())
-            return []
+            self.log(f"Primary visual attempt failed ({e}). Retrying with gpt-4o-mini...")
+            try:
+                response_text = self._call_ai_with_images(prompt, frame_paths, model="gpt-4o-mini")
+                success = True
+            except Exception as e2:
+                self.log(f"Visual retry failed ({e2}). Moving on.")
+                
+        # Cleanup local frames
+        for f in frames:
+            if os.path.exists(f['path']):
+                os.remove(f['path'])
 
+        if not success:
+            return []
+            
+        self.log(f"OpenAI response received.")
+        
+        # Parse JSON
+        try:
+            parsed_response = json.loads(response_text)
+            data = parsed_response.get("clips", [])
+        except json.JSONDecodeError as je:
+            self.log(f"JSON Parse Error. Error: {je}")
+            data = []
+
+        self.log(f"Parsed {len(data)} moments from visual analysis.")
+            
+        final_moments = []
+        for item in data:
+            try:
+                abs_start = self._parse_time(item['start_time'])
+                abs_end = self._parse_time(item['end_time'])
+                
+                if abs_start >= abs_end:
+                     continue
+
+                item['abs_start'] = abs_start
+                item['abs_end'] = abs_end
+                final_moments.append(item)
+            except Exception as e:
+                self.log(f"Error parsing timestamp {item}: {e}")
+
+        return self._deduplicate(final_moments)
+            
     def _chunk_audio(self, audio_path):
         duration = self._get_duration(audio_path)
         self.log(f"Audio duration: {timedelta(seconds=duration)}")
@@ -859,8 +932,8 @@ class GeneratorWorker(QThread):
                     self.log(f"  Clip {i+1}: Starting caption generation in background...")
                     caption_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
                     
-                    if getattr(self, 'is_english_audio', True):
-                        self.log(f"  Clip {i+1}: Using Whisper AI for karaoke English captions.")
+                    if getattr(self, 'is_supported_whisper_lang', True):
+                        self.log(f"  Clip {i+1}: Supported Whisper language detected. Using Whisper AI for word-level karaoke captions.")
                         caption_future = caption_executor.submit(
                             self._generate_captions_from_clip,
                             i,
@@ -869,7 +942,7 @@ class GeneratorWorker(QThread):
                             end
                         )
                     else:
-                        self.log(f"  Clip {i+1}: Non-English detected. Using VTT extraction for standard captions.")
+                        self.log(f"  Clip {i+1}: Other language detected. Using VTT extraction for standard captions.")
                         caption_future = caption_executor.submit(
                             self._generate_captions_for_clip,
                             i,
@@ -1130,7 +1203,7 @@ class GeneratorWorker(QThread):
                     break
             if not is_overlap:
                 final_moments.append(m)
-                if len(final_moments) >= 10: 
+                if len(final_moments) >= self.num_clips: 
                     break
         self.log(f"Retained {len(final_moments)} unique moments.")
         return final_moments
