@@ -29,7 +29,7 @@ class AIAnalyzer:
         self.num_clips = num_clips
         self.log = log_callback
 
-    def _call_ai_text(self, prompt: str, model: str = "gpt-5-mini") -> str:
+    def _call_ai_text(self, prompt: str, model: str = "gpt-5.4-nano") -> str:
         """Call AI with text prompt, returns JSON text response via parsed model"""
         response = self.client.beta.chat.completions.parse(
             model=model,
@@ -39,7 +39,7 @@ class AIAnalyzer:
         )
         return response.choices[0].message.parsed.model_dump_json()
 
-    def _call_ai_with_audio(self, prompt: str, audio_path: str, model: str = "gpt-5-mini") -> str:
+    def _call_ai_with_audio(self, prompt: str, audio_path: str, model: str = "gpt-5.4-nano") -> str:
         """Call AI with audio file: transcribe with whisper-1, then analyze"""
         with open(audio_path, 'rb') as f:
             transcript = self.client.audio.transcriptions.create(
@@ -58,7 +58,7 @@ class AIAnalyzer:
         )
         return response.choices[0].message.parsed.model_dump_json()
 
-    def _call_ai_with_images(self, prompt: str, image_paths: list, model: str = "gpt-5-mini") -> str:
+    def _call_ai_with_images(self, prompt: str, image_paths: list, model: str = "gpt-5.4-nano") -> str:
         """Call AI with multiple images, returns JSON text response via parsed model"""
         content = [{"type": "text", "text": prompt}]
         
@@ -121,13 +121,13 @@ class AIAnalyzer:
                 return self._call_ai_with_audio(prompt, chunk_data['path'], model=model_name)
 
         try:
-            self.log(f"Chunk {i+1}: Attempting analysis with gpt-5-mini (120s timeout)...")
-            response_text = attempt_analysis("gpt-5-mini")
+            self.log(f"Chunk {i+1}: Attempting analysis with gpt-5.4-nano (120s timeout)...")
+            response_text = attempt_analysis("gpt-5.4-nano")
             success = True
         except Exception as e:
-            self.log(f"Chunk {i+1}: Primary attempt failed ({e}). Retrying with gpt-4o-mini...")
+            self.log(f"Chunk {i+1}: Primary attempt failed ({e}). Retrying with gpt-5-nano...")
             try:
-                response_text = attempt_analysis("gpt-4o-mini")
+                response_text = attempt_analysis("gpt-5-nano")
                 success = True
             except Exception as e2:
                 self.log(f"Chunk {i+1}: Retry failed ({e2}). Moving on without this chunk.")
@@ -205,14 +205,14 @@ class AIAnalyzer:
         success = False
         
         try:
-            self.log(f"Sending prompt to OpenAI (gpt-5-mini, 120s timeout)...")
+            self.log(f"Sending prompt to OpenAI (gpt-5.4-nano, 120s timeout)...")
             prompt = VISUAL_MOMENTS_PROMPT.format(num_clips=self.num_clips)
-            response_text = self._call_ai_with_images(prompt, frame_paths, model="gpt-5-mini")
+            response_text = self._call_ai_with_images(prompt, frame_paths, model="gpt-5.4-nano")
             success = True
         except Exception as e:
-            self.log(f"Primary visual attempt failed ({e}). Retrying with gpt-4o-mini...")
+            self.log(f"Primary visual attempt failed ({e}). Retrying with gpt-5-nano...")
             try:
-                response_text = self._call_ai_with_images(prompt, frame_paths, model="gpt-4o-mini")
+                response_text = self._call_ai_with_images(prompt, frame_paths, model="gpt-5-nano")
                 success = True
             except Exception as e2:
                 self.log(f"Visual retry failed ({e2}). Moving on.")
